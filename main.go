@@ -11,6 +11,8 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/go-kit/kit/log"
@@ -20,7 +22,9 @@ import (
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/common/model"
 	"github.com/prometheus/common/version"
+	"github.com/prometheus/prometheus/tsdb/labels"
 	"github.com/thanos-io/thanos/pkg/runutil"
 	"github.com/thanos-io/thanos/pkg/tracing/client"
 	"go.uber.org/automaxprocs/maxprocs"
@@ -227,4 +231,24 @@ func metricHTTPListenGroup(g *run.Group, logger log.Logger, reg *prometheus.Regi
 		runutil.CloseWithLogOnErr(logger, l, "metric listener")
 	})
 	return nil
+}
+
+func parseFlagMatchers(s []string) ([]labels.Matcher, error) {
+	var matchers []labels.Matcher
+	for _, l := range s {
+		parts := strings.SplitN(l, "=", 2)
+		if len(parts) != 2 {
+			return nil, errors.Errorf("unrecognized label %q", l)
+		}
+		if !model.LabelName.IsValid(model.LabelName(string(parts[0]))) {
+			return nil, errors.Errorf("unsupported format for label %s", l)
+		}
+		labelName := parts[0]
+		labelValue, err := strconv.Unquote(parts[1])
+		if err != nil {
+			return nil, errors.Wrap(err, "unquote label value")
+		}
+		matchers = append(matchers, labels.NewEqualMatcher(labelName, labelValue))
+	}
+	return matchers, nil
 }
