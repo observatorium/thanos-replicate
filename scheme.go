@@ -191,6 +191,7 @@ func (rs *replicationScheme) ensureBlockIsReplicated(ctx context.Context, id uli
 		return err
 	}
 
+	level.Debug(rs.logger).Log("msg", "replicating meta file", "object", metaFile)
 	if err := rs.toBkt.Upload(ctx, metaFile, bytes.NewReader(originMetaFileContent)); err != nil {
 		return err
 	}

@@ -13,6 +13,7 @@ require (
 	github.com/prometheus/client_golang v1.1.0
 	github.com/prometheus/common v0.7.0
 	github.com/prometheus/prometheus v1.8.2-0.20190913102521-8ab628b35467
+	github.com/prometheus/tsdb v0.10.0 // indirect
 	github.com/thanos-io/thanos v0.0.0-00010101000000-000000000000
 	go.uber.org/automaxprocs v1.2.0
 	google.golang.org/grpc v1.24.0 // indirect
