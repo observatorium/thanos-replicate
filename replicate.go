@@ -10,7 +10,9 @@ import (
 	opentracing "github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/prometheus/tsdb/labels"
 	"github.com/thanos-io/thanos/pkg/component"
+	"github.com/thanos-io/thanos/pkg/extflag"
 	"github.com/thanos-io/thanos/pkg/objstore/client"
 	"github.com/thanos-io/thanos/pkg/runutil"
 	kingpin "gopkg.in/alecthomas/kingpin.v2"
@@ -24,13 +26,21 @@ func registerReplicate(m map[string]setupFunc, app *kingpin.Application, name st
 	fromObjStoreConfig := regCommonObjStoreFlags(cmd, "from", false)
 	toObjStoreConfig := regCommonObjStoreFlags(cmd, "to", false)
 
+	matcherStrs := cmd.Flag("matcher", "Only blocks whose labels match this matcher will be replicated.").PlaceHolder("key=\"value\"").Strings()
+
 	m[name] = func(g *run.Group, logger log.Logger, reg *prometheus.Registry, tracer opentracing.Tracer, _ bool) error {
+		matchers, err := parseFlagMatchers(*matcherStrs)
+		if err != nil {
+			return errors.Wrap(err, "parse block label matchers")
+		}
+
 		return runReplicate(
 			g,
 			logger,
 			reg,
 			tracer,
 			*httpMetricsBindAddr,
+			labels.Selector(matchers),
 			fromObjStoreConfig,
 			toObjStoreConfig,
 		)
@@ -43,8 +53,9 @@ func runReplicate(
 	reg *prometheus.Registry,
 	tracer opentracing.Tracer,
 	httpMetricsBindAddr string,
-	fromObjStoreConfig *pathOrContent,
-	toObjStoreConfig *pathOrContent,
+	labelSelector labels.Selector,
+	fromObjStoreConfig *extflag.PathOrContent,
+	toObjStoreConfig *extflag.PathOrContent,
 ) error {
 	logger = log.With(logger, "component", "replicate")
 
@@ -81,6 +92,7 @@ func runReplicate(
 		return err
 	}
 
+	r := newReplicationScheme(logger, NewBlockFilter(labelSelector).Filter, fromBkt, toBkt)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	g.Add(func() error {
@@ -88,7 +100,16 @@ func runReplicate(
 		defer runutil.CloseWithLogOnErr(logger, toBkt, "to bucket client")
 
 		return runutil.Repeat(time.Minute, ctx.Done(), func() error {
-			// actually replicate here
+			level.Info(logger).Log("msg", "running replication attempt")
+			err := r.execute(ctx)
+			if err != nil {
+				level.Error(logger).Log("msg", "running replicaton failed", "err", err)
+				return nil
+			}
+
+			level.Info(logger).Log("msg", "ran replication successfully")
+
+			// No matter the error we want to repeat indefinitely.
 			return nil
 		})
 	}, func(error) {
