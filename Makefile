@@ -22,6 +22,7 @@ go-vendor: go.mod go.sum
 lint:
 	golangci-lint run -v --enable-all
 
+.PHONY: test
 test:
 	CGO_ENABLED=1 GO111MODULE=on go test -v -race ./...
 

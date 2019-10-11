@@ -15,6 +15,7 @@ import (
 	"github.com/go-kit/kit/log/level"
 	"github.com/oklog/ulid"
 	"github.com/prometheus/prometheus/tsdb"
+	"github.com/prometheus/tsdb/testutil"
 	"github.com/thanos-io/thanos/pkg/block/metadata"
 	"github.com/thanos-io/thanos/pkg/compact"
 	"github.com/thanos-io/thanos/pkg/objstore"
@@ -28,9 +29,9 @@ func testLogger(testName string) log.Logger {
 	)
 }
 
-func testULID(inc uint64) ulid.ULID {
-	timestamp := time.Unix(1000000, 0)
-	entropy := ulid.Monotonic(rand.New(rand.NewSource(timestamp.UnixNano())), inc)
+func testULID(inc int64) ulid.ULID {
+	timestamp := time.Unix(1000000+inc, 0)
+	entropy := ulid.Monotonic(rand.New(rand.NewSource(timestamp.UnixNano())), 0)
 	ulid := ulid.MustNew(ulid.Timestamp(timestamp), entropy)
 
 	return ulid
@@ -67,7 +68,7 @@ func TestReplicationSchemeAll(t *testing.T) {
 		{
 			name: "NoMeta",
 			prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {
-				originBucket.Upload(ctx, path.Join(testULID(0).String(), "chunks", "000001"), bytes.NewReader(nil))
+				_ = originBucket.Upload(ctx, path.Join(testULID(0).String(), "chunks", "000001"), bytes.NewReader(nil))
 			},
 			assert: func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {
 				if len(targetBucket.Objects()) != 0 {
@@ -78,7 +79,7 @@ func TestReplicationSchemeAll(t *testing.T) {
 		{
 			name: "PartialMeta",
 			prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {
-				originBucket.Upload(ctx, path.Join(testULID(0).String(), "meta.json"), bytes.NewReader([]byte("{")))
+				_ = originBucket.Upload(ctx, path.Join(testULID(0).String(), "meta.json"), bytes.NewReader([]byte("{")))
 			},
 			assert: func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {
 				if len(targetBucket.Objects()) != 0 {
@@ -93,12 +94,10 @@ func TestReplicationSchemeAll(t *testing.T) {
 				meta := testMeta(ulid)
 
 				b, err := json.Marshal(meta)
-				if err != nil {
-					t.Fatal(err)
-				}
-				originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
-				originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
-				originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
+				testutil.Ok(t, err)
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
 			},
 			assert: func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {
 				if len(targetBucket.Objects()) != 3 {
@@ -113,22 +112,50 @@ func TestReplicationSchemeAll(t *testing.T) {
 				meta := testMeta(ulid)
 
 				b, err := json.Marshal(meta)
-				if err != nil {
-					t.Fatal(err)
-				}
-				originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
-				originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
-				originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
+				testutil.Ok(t, err)
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
 
-				targetBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), io.LimitReader(bytes.NewReader(b), int64(len(b)-10)))
-				targetBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
-				targetBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
+				_ = targetBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), io.LimitReader(bytes.NewReader(b), int64(len(b)-10)))
+				_ = targetBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
+				_ = targetBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
 			},
 			assert: func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {
 				for k := range originBucket.Objects() {
 					if !bytes.Equal(originBucket.Objects()[k], targetBucket.Objects()[k]) {
 						t.Fatalf("Object %s not equal in origin and target bucket.", k)
 					}
+				}
+			},
+		},
+		{
+			name: "OnlyUploadsRaw",
+			prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {
+				ulid := testULID(0)
+				meta := testMeta(ulid)
+
+				b, err := json.Marshal(meta)
+				testutil.Ok(t, err)
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
+
+				ulid = testULID(1)
+				meta = testMeta(ulid)
+				meta.Thanos.Downsample.Resolution = int64(compact.ResolutionLevel5m)
+
+				b, err = json.Marshal(meta)
+				testutil.Ok(t, err)
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
+			},
+			assert: func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {
+				expected := 3
+				got := len(targetBucket.Objects())
+				if got != expected {
+					t.Fatalf("TargetBucket should have one block made up of three objects replicated. Got %d but expected %d objects.", got, expected)
 				}
 			},
 		},
@@ -149,9 +176,7 @@ func TestReplicationSchemeAll(t *testing.T) {
 		)
 
 		err := r.execute(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
+		testutil.Ok(t, err)
 
 		c.assert(ctx, t, originBucket, targetBucket)
 	}

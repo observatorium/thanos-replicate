@@ -33,10 +33,43 @@ import (
 
 const (
 	logFormatLogfmt = "logfmt"
-	logFormatJson   = "json"
+	logFormatJSON   = "json"
 )
 
 type setupFunc func(*run.Group, log.Logger, *prometheus.Registry, opentracing.Tracer, bool) error
+
+func logger(logLevel, logFormat, debugName string) log.Logger {
+	var (
+		logger log.Logger
+		lvl    level.Option
+	)
+
+	switch logLevel {
+	case "error":
+		lvl = level.AllowError()
+	case "warn":
+		lvl = level.AllowWarn()
+	case "info":
+		lvl = level.AllowInfo()
+	case "debug":
+		lvl = level.AllowDebug()
+	default:
+		panic("unexpected log level")
+	}
+
+	logger = log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
+	if logFormat == logFormatJSON {
+		logger = log.NewJSONLogger(log.NewSyncWriter(os.Stderr))
+	}
+
+	logger = level.NewFilter(logger, lvl)
+
+	if debugName != "" {
+		logger = log.With(logger, "name", debugName)
+	}
+
+	return log.With(logger, "ts", log.DefaultTimestampUTC, "caller", log.DefaultCaller)
+}
 
 func main() {
 	if os.Getenv("DEBUG") != "" {
@@ -54,7 +87,7 @@ func main() {
 	logLevel := app.Flag("log.level", "Log filtering level.").
 		Default("info").Enum("error", "warn", "info", "debug")
 	logFormat := app.Flag("log.format", "Log format to use.").
-		Default(logFormatLogfmt).Enum(logFormatLogfmt, logFormatJson)
+		Default(logFormatLogfmt).Enum(logFormatLogfmt, logFormatJSON)
 
 	tracingConfig := regCommonTracingFlags(app)
 
@@ -68,34 +101,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	var logger log.Logger
-	{
-		var lvl level.Option
-		switch *logLevel {
-		case "error":
-			lvl = level.AllowError()
-		case "warn":
-			lvl = level.AllowWarn()
-		case "info":
-			lvl = level.AllowInfo()
-		case "debug":
-			lvl = level.AllowDebug()
-		default:
-			panic("unexpected log level")
-		}
-		logger = log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
-		if *logFormat == logFormatJson {
-			logger = log.NewJSONLogger(log.NewSyncWriter(os.Stderr))
-		}
-		logger = level.NewFilter(logger, lvl)
-
-		if *debugName != "" {
-			logger = log.With(logger, "name", *debugName)
-		}
-
-		logger = log.With(logger, "ts", log.DefaultTimestampUTC, "caller", log.DefaultCaller)
-	}
-
+	logger := logger(*logLevel, *logFormat, *debugName)
 	loggerAdapter := func(template string, args ...interface{}) {
 		level.Debug(logger).Log("msg", fmt.Sprintf(template, args))
 	}
@@ -103,10 +109,11 @@ func main() {
 	// Running in container with limits but with empty/wrong value of GOMAXPROCS env var could lead to throttling by cpu
 	// maxprocs will automate adjustment by using cgroups info about cpu limit if it set as value for runtime.GOMAXPROCS
 	undo, err := maxprocs.Set(maxprocs.Logger(loggerAdapter))
-	defer undo()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, errors.Wrapf(err, "failed to set GOMAXPROCS: %v", err))
 	}
+
+	defer undo()
 
 	metrics := prometheus.NewRegistry()
 	metrics.MustRegister(
@@ -117,8 +124,10 @@ func main() {
 
 	prometheus.DefaultRegisterer = metrics
 
-	var g run.Group
-	var tracer opentracing.Tracer
+	var (
+		g      run.Group
+		tracer opentracing.Tracer
+	)
 
 	// Setup optional tracing.
 	{
@@ -144,8 +153,6 @@ func main() {
 		}
 
 		// This is bad, but Prometheus does not support any other tracer injections than just global one.
-		// TODO(bplotka): Work with basictracer to handle gracefully tracker mismatches, and also with Prometheus to allow
-		// tracer injection.
 		opentracing.SetGlobalTracer(tracer)
 
 		ctx, cancel := context.WithCancel(ctx)
@@ -181,6 +188,7 @@ func main() {
 		level.Error(logger).Log("msg", "running command failed", "err", err)
 		os.Exit(1)
 	}
+
 	level.Info(logger).Log("msg", "exiting")
 }
 
@@ -212,9 +220,8 @@ func registerMetrics(mux *http.ServeMux, g prometheus.Gatherer) {
 	mux.Handle("/metrics", promhttp.HandlerFor(g, promhttp.HandlerOpts{}))
 }
 
-// TODO Remove once all components are migrated to the new defaultHTTPListener.
 // metricHTTPListenGroup is a run.Group that servers HTTP endpoint with only Prometheus metrics.
-func metricHTTPListenGroup(g *run.Group, logger log.Logger, reg *prometheus.Registry, httpBindAddr string) error {
+func metricHTTPListenGroup(g *run.Group, logger log.Logger, reg prometheus.Gatherer, httpBindAddr string) error {
 	mux := http.NewServeMux()
 	registerMetrics(mux, reg)
 	registerProfile(mux)
@@ -230,25 +237,31 @@ func metricHTTPListenGroup(g *run.Group, logger log.Logger, reg *prometheus.Regi
 	}, func(error) {
 		runutil.CloseWithLogOnErr(logger, l, "metric listener")
 	})
+
 	return nil
 }
 
 func parseFlagMatchers(s []string) ([]labels.Matcher, error) {
-	var matchers []labels.Matcher
+	matchers := make([]labels.Matcher, 0, len(s))
+
 	for _, l := range s {
 		parts := strings.SplitN(l, "=", 2)
 		if len(parts) != 2 {
 			return nil, errors.Errorf("unrecognized label %q", l)
 		}
-		if !model.LabelName.IsValid(model.LabelName(string(parts[0]))) {
+
+		labelName := parts[0]
+		if !model.LabelName.IsValid(model.LabelName(labelName)) {
 			return nil, errors.Errorf("unsupported format for label %s", l)
 		}
-		labelName := parts[0]
+
 		labelValue, err := strconv.Unquote(parts[1])
 		if err != nil {
 			return nil, errors.Wrap(err, "unquote label value")
 		}
+
 		matchers = append(matchers, labels.NewEqualMatcher(labelName, labelValue))
 	}
+
 	return matchers, nil
 }

@@ -20,7 +20,7 @@ import (
 )
 
 type Block struct {
-	Id   ulid.ULID
+	ID   ulid.ULID
 	Meta *metadata.Meta
 }
 
@@ -31,7 +31,7 @@ func (b blocks) Len() int {
 }
 
 func (b blocks) Less(i, j int) bool {
-	return b[i].Meta.MinTime < b[i].Meta.MinTime
+	return b[i].Meta.MinTime < b[j].Meta.MinTime
 }
 
 func (b blocks) Swap(i, j int) {
@@ -84,6 +84,7 @@ func (rs *replicationScheme) execute(ctx context.Context) error {
 	availableBlocks := blocks{}
 
 	level.Debug(rs.logger).Log("msg", "scanning blocks available blocks for replication")
+
 	err := rs.fromBkt.Iter(ctx, "", func(name string) error {
 		// Strip trailing slash indicating a directory.
 		id, err := ulid.Parse(name[:len(name)-1])
@@ -106,20 +107,22 @@ func (rs *replicationScheme) execute(ctx context.Context) error {
 		level.Debug(rs.logger).Log("msg", "adding block to available blocks", "block_uuid", id.String())
 
 		availableBlocks = append(availableBlocks, &Block{
-			Id:   id,
+			ID:   id,
 			Meta: meta,
 		})
 
 		return nil
 	})
+
 	if err != nil {
 		return err
 	}
 
 	candidateBlocks := blocks{}
+
 	for _, b := range availableBlocks {
 		if rs.blockFilter(b) {
-			level.Debug(rs.logger).Log("msg", "adding block to candidate blocks", "block_uuid", b.Id.String())
+			level.Debug(rs.logger).Log("msg", "adding block to candidate blocks", "block_uuid", b.ID.String())
 			candidateBlocks = append(candidateBlocks, b)
 		}
 	}
@@ -129,7 +132,7 @@ func (rs *replicationScheme) execute(ctx context.Context) error {
 	sort.Sort(sort.Reverse(candidateBlocks))
 
 	for _, b := range candidateBlocks {
-		if err := rs.ensureBlockIsReplicated(ctx, b.Id); err != nil {
+		if err := rs.ensureBlockIsReplicated(ctx, b.ID); err != nil {
 			return err
 		}
 	}
@@ -140,23 +143,25 @@ func (rs *replicationScheme) execute(ctx context.Context) error {
 // ensureBlockIsReplicated ensures that a block present in the origin bucket is
 // present in the target bucket.
 func (rs *replicationScheme) ensureBlockIsReplicated(ctx context.Context, id ulid.ULID) error {
-	blockId := id.String()
-	chunksDir := path.Join(blockId, thanosblock.ChunksDirname)
-	indexFile := path.Join(blockId, thanosblock.IndexFilename)
-	metaFile := path.Join(blockId, thanosblock.MetaFilename)
+	blockID := id.String()
+	chunksDir := path.Join(blockID, thanosblock.ChunksDirname)
+	indexFile := path.Join(blockID, thanosblock.IndexFilename)
+	metaFile := path.Join(blockID, thanosblock.MetaFilename)
 
-	level.Debug(rs.logger).Log("msg", "ensuring block is replicated", "block_uuid", blockId)
+	level.Debug(rs.logger).Log("msg", "ensuring block is replicated", "block_uuid", blockID)
 
 	originMetaFile, err := rs.fromBkt.Get(ctx, metaFile)
 	if err != nil {
 		return err
 	}
+
 	defer originMetaFile.Close()
 
 	targetMetaFile, err := rs.toBkt.Get(ctx, metaFile)
 	if targetMetaFile != nil {
 		defer targetMetaFile.Close()
 	}
+
 	if err != nil && !rs.toBkt.IsObjNotFoundErr(err) {
 		return err
 	}
@@ -192,6 +197,7 @@ func (rs *replicationScheme) ensureBlockIsReplicated(ctx context.Context, id uli
 	}
 
 	level.Debug(rs.logger).Log("msg", "replicating meta file", "object", metaFile)
+
 	if err := rs.toBkt.Upload(ctx, metaFile, bytes.NewReader(originMetaFileContent)); err != nil {
 		return err
 	}
@@ -221,6 +227,7 @@ func (rs *replicationScheme) ensureObjectReplicated(ctx context.Context, objectN
 	if err != nil {
 		return err
 	}
+
 	defer r.Close()
 
 	err = rs.toBkt.Upload(ctx, objectName, r)
@@ -245,9 +252,11 @@ func loadMeta(ctx context.Context, bucket objstore.BucketReader, id ulid.ULID) (
 	if bucket.IsObjNotFoundErr(err) {
 		return nil, true, err
 	}
+
 	if err != nil {
 		return nil, false, err
 	}
+
 	defer r.Close()
 
 	metaContent, err := ioutil.ReadAll(r)
@@ -259,6 +268,7 @@ func loadMeta(ctx context.Context, bucket objstore.BucketReader, id ulid.ULID) (
 	if err := json.Unmarshal(metaContent, &m); err != nil {
 		return nil, true, err
 	}
+
 	if m.Version != metadata.MetaVersion1 {
 		return nil, false, errors.Errorf("unexpected meta file version %d", m.Version)
 	}
