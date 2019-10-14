@@ -51,7 +51,7 @@ func runReplicate(
 	g *run.Group,
 	logger log.Logger,
 	reg *prometheus.Registry,
-	tracer opentracing.Tracer,
+	_ opentracing.Tracer,
 	httpMetricsBindAddr string,
 	labelSelector labels.Selector,
 	fromObjStoreConfig *extflag.PathOrContent,
@@ -60,6 +60,7 @@ func runReplicate(
 	logger = log.With(logger, "component", "replicate")
 
 	level.Debug(logger).Log("msg", "setting up metric http listen-group")
+
 	if err := metricHTTPListenGroup(g, logger, reg, httpMetricsBindAddr); err != nil {
 		return err
 	}
@@ -92,9 +93,16 @@ func runReplicate(
 		return err
 	}
 
+	replicationRunCounter := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "thanos_replicate_replication_runs_total",
+		Help: "The number of replication runs split by success and error.",
+	}, []string{"result"})
+	reg.MustRegister(replicationRunCounter)
+
 	r := newReplicationScheme(logger, NewBlockFilter(labelSelector).Filter, fromBkt, toBkt)
 
 	ctx, cancel := context.WithCancel(context.Background())
+
 	g.Add(func() error {
 		defer runutil.CloseWithLogOnErr(logger, fromBkt, "from bucket client")
 		defer runutil.CloseWithLogOnErr(logger, toBkt, "to bucket client")
@@ -104,9 +112,11 @@ func runReplicate(
 			err := r.execute(ctx)
 			if err != nil {
 				level.Error(logger).Log("msg", "running replicaton failed", "err", err)
+				replicationRunCounter.WithLabelValues("error").Inc()
 				return nil
 			}
 
+			replicationRunCounter.WithLabelValues("success").Inc()
 			level.Info(logger).Log("msg", "ran replication successfully")
 
 			// No matter the error we want to repeat indefinitely.
