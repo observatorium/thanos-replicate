@@ -15,6 +15,7 @@ import (
 	"github.com/go-kit/kit/log/level"
 	"github.com/oklog/ulid"
 	"github.com/prometheus/prometheus/tsdb"
+	"github.com/prometheus/prometheus/tsdb/labels"
 	"github.com/prometheus/tsdb/testutil"
 	"github.com/thanos-io/thanos/pkg/block/metadata"
 	"github.com/thanos-io/thanos/pkg/compact"
@@ -40,6 +41,9 @@ func testULID(inc int64) ulid.ULID {
 func testMeta(ulid ulid.ULID) *metadata.Meta {
 	return &metadata.Meta{
 		Thanos: metadata.Thanos{
+			Labels: map[string]string{
+				"test-labelname": "test-labelvalue",
+			},
 			Downsample: metadata.ThanosDownsample{
 				Resolution: int64(compact.ResolutionLevelRaw),
 			},
@@ -159,6 +163,84 @@ func TestReplicationSchemeAll(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "UploadMultipleCandidatesWhenPresent",
+			prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {
+				ulid := testULID(0)
+				meta := testMeta(ulid)
+
+				b, err := json.Marshal(meta)
+				testutil.Ok(t, err)
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
+
+				ulid = testULID(1)
+				meta = testMeta(ulid)
+
+				b, err = json.Marshal(meta)
+				testutil.Ok(t, err)
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
+			},
+			assert: func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {
+				expected := 6
+				got := len(targetBucket.Objects())
+				if got != expected {
+					t.Fatalf("TargetBucket should have two blocks made up of three objects replicated. Got %d but expected %d objects.", got, expected)
+				}
+			},
+		},
+		{
+			name: "LabelSelector",
+			prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {
+				ulid := testULID(0)
+				meta := testMeta(ulid)
+
+				b, err := json.Marshal(meta)
+				testutil.Ok(t, err)
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
+
+				ulid = testULID(1)
+				meta = testMeta(ulid)
+				meta.Thanos.Labels["test-labelname"] = "non-selected-value"
+
+				b, err = json.Marshal(meta)
+				testutil.Ok(t, err)
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
+			},
+			assert: func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {
+				expected := 3
+				got := len(targetBucket.Objects())
+				if got != expected {
+					t.Fatalf("TargetBucket should have one block made up of three objects replicated. Got %d but expected %d objects.", got, expected)
+				}
+			},
+		},
+		{
+			name: "NonZeroCompaction",
+			prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {
+				ulid := testULID(0)
+				meta := testMeta(ulid)
+				meta.BlockMeta.Compaction.Level = 1
+
+				b, err := json.Marshal(meta)
+				testutil.Ok(t, err)
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
+			},
+			assert: func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {
+				if len(targetBucket.Objects()) != 0 {
+					t.Fatal("TargetBucket should have been empty but is not.")
+				}
+			},
+		},
 	}
 
 	for _, c := range cases {
@@ -170,7 +252,9 @@ func TestReplicationSchemeAll(t *testing.T) {
 
 		r := newReplicationScheme(
 			testLogger(t.Name()+"/"+c.name),
-			NewBlockFilter(nil).Filter,
+			NewBlockFilter(labels.Selector{
+				labels.NewEqualMatcher("test-labelname", "test-labelvalue"),
+			}).Filter,
 			originBucket,
 			targetBucket,
 		)
