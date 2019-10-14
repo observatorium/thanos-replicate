@@ -11,6 +11,13 @@ CONTAINER_CMD:=docker run --rm \
 
 all: thanos-replicate
 
+tmp/help.txt: thanos-replicate
+	mkdir -p tmp
+	./thanos-replicate run --help &> tmp/help.txt
+
+README.md: tmp/help.txt
+	embedmd -w README.md
+
 thanos-replicate: go-vendor $(SRC)
 	CGO_ENABLED=0 GO111MODULE=on go build -mod vendor -v
 
