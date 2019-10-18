@@ -2,21 +2,24 @@ package main
 
 import (
 	"context"
+	"math/rand"
 	"time"
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/oklog/run"
+	"github.com/oklog/ulid"
 	opentracing "github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/tsdb/labels"
-	"github.com/thanos-io/thanos/pkg/component"
 	"github.com/thanos-io/thanos/pkg/extflag"
 	"github.com/thanos-io/thanos/pkg/objstore/client"
 	"github.com/thanos-io/thanos/pkg/runutil"
 	kingpin "gopkg.in/alecthomas/kingpin.v2"
 )
+
+const replicateComponent = "replicate"
 
 func registerReplicate(m map[string]setupFunc, app *kingpin.Application, name string) {
 	cmd := app.Command(name, "Runs replication as a long running daemon.")
@@ -74,7 +77,7 @@ func runReplicate(
 		return errors.New("No supported bucket was configured to replicate from")
 	}
 
-	fromBkt, err := client.NewBucket(logger, fromConfContentYaml, reg, component.Sidecar.String())
+	fromBkt, err := client.NewBucket(logger, fromConfContentYaml, reg, replicateComponent)
 	if err != nil {
 		return err
 	}
@@ -88,7 +91,7 @@ func runReplicate(
 		return errors.New("No supported bucket was configured to replicate to")
 	}
 
-	toBkt, err := client.NewBucket(logger, toConfContentYaml, reg, component.Sidecar.String())
+	toBkt, err := client.NewBucket(logger, toConfContentYaml, reg, replicateComponent)
 	if err != nil {
 		return err
 	}
@@ -99,8 +102,8 @@ func runReplicate(
 	}, []string{"result"})
 	reg.MustRegister(replicationRunCounter)
 
-	r := newReplicationScheme(logger, NewBlockFilter(labelSelector).Filter, fromBkt, toBkt)
-
+	blockFilter := NewBlockFilter(labelSelector).Filter
+	metrics := newReplicationMetrics(reg)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	g.Add(func() error {
@@ -108,8 +111,16 @@ func runReplicate(
 		defer runutil.CloseWithLogOnErr(logger, toBkt, "to bucket client")
 
 		return runutil.Repeat(time.Minute, ctx.Done(), func() error {
+			timestamp := time.Now()
+			entropy := ulid.Monotonic(rand.New(rand.NewSource(timestamp.UnixNano())), 0)
+			ulid, err := ulid.New(ulid.Timestamp(timestamp), entropy)
+			if err != nil {
+				return errors.Wrap(err, "generate replication run-id")
+			}
+			logger := log.With(logger, "replication-run-id", ulid.String())
+
 			level.Info(logger).Log("msg", "running replication attempt")
-			err := r.execute(ctx)
+			err = newReplicationScheme(logger, metrics, blockFilter, fromBkt, toBkt).execute(ctx)
 			if err != nil {
 				level.Error(logger).Log("msg", "running replicaton failed", "err", err)
 				replicationRunCounter.WithLabelValues("error").Inc()

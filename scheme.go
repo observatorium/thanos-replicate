@@ -12,6 +12,7 @@ import (
 	"github.com/go-kit/kit/log/level"
 	"github.com/oklog/ulid"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/tsdb/labels"
 	thanosblock "github.com/thanos-io/thanos/pkg/block"
 	"github.com/thanos-io/thanos/pkg/block/metadata"
@@ -64,10 +65,61 @@ type replicationScheme struct {
 
 	blockFilter blockFilterFunc
 
-	logger log.Logger
+	logger  log.Logger
+	metrics *replicationMetrics
 }
 
-func newReplicationScheme(logger log.Logger, blockFilter blockFilterFunc, from objstore.BucketReader, to objstore.Bucket) *replicationScheme {
+type replicationMetrics struct {
+	originIterations  prometheus.Counter
+	originMetaLoads   prometheus.Counter
+	originPartialMeta prometheus.Counter
+
+	blocksAlreadyReplicated prometheus.Counter
+	blocksReplicated        prometheus.Counter
+	objectsReplicated       prometheus.Counter
+}
+
+func newReplicationMetrics(reg prometheus.Registerer) *replicationMetrics {
+	m := &replicationMetrics{
+		originIterations: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "thanos_replicate_origin_iterations_total",
+			Help: "Total number of objects iterated over in the origin bucket.",
+		}),
+		originMetaLoads: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "thanos_replicate_origin_meta_loads_total",
+			Help: "Total number of meta.json reads in the origin bucket.",
+		}),
+		originPartialMeta: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "thanos_replicate_origin_partial_meta_reads_total",
+			Help: "Total number of partial meta reads encountered.",
+		}),
+		blocksAlreadyReplicated: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "thanos_replicate_blocks_already_replicated_total",
+			Help: "Total number of blocks skipped due to already being replicated.",
+		}),
+		blocksReplicated: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "thanos_replicate_blocks_replicated_total",
+			Help: "Total number of blocks replicated.",
+		}),
+		objectsReplicated: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "thanos_replicate_objects_replicated_total",
+			Help: "Total number of objects replicated.",
+		}),
+	}
+
+	if reg != nil {
+		reg.MustRegister(m.originIterations)
+		reg.MustRegister(m.originMetaLoads)
+		reg.MustRegister(m.originPartialMeta)
+		reg.MustRegister(m.blocksAlreadyReplicated)
+		reg.MustRegister(m.blocksReplicated)
+		reg.MustRegister(m.objectsReplicated)
+	}
+
+	return m
+}
+
+func newReplicationScheme(logger log.Logger, metrics *replicationMetrics, blockFilter blockFilterFunc, from objstore.BucketReader, to objstore.Bucket) *replicationScheme {
 	if logger == nil {
 		logger = log.NewNopLogger()
 	}
@@ -77,6 +129,7 @@ func newReplicationScheme(logger log.Logger, blockFilter blockFilterFunc, from o
 		blockFilter: blockFilter,
 		fromBkt:     from,
 		toBkt:       to,
+		metrics:     metrics,
 	}
 }
 
@@ -86,17 +139,21 @@ func (rs *replicationScheme) execute(ctx context.Context) error {
 	level.Debug(rs.logger).Log("msg", "scanning blocks available blocks for replication")
 
 	err := rs.fromBkt.Iter(ctx, "", func(name string) error {
+		rs.metrics.originIterations.Inc()
+
 		// Strip trailing slash indicating a directory.
 		id, err := ulid.Parse(name[:len(name)-1])
 		if err != nil {
 			return nil
 		}
 
+		rs.metrics.originMetaLoads.Inc()
 		meta, metaNonExistentOrPartial, err := loadMeta(ctx, rs.fromBkt, id)
 		if metaNonExistentOrPartial {
 			// meta.json is the last file uploaded by a Thanos shipper,
 			// therefore a block may be partially present, but no meta.json
 			// file yet. If this is the case we skip that block for now.
+			rs.metrics.originPartialMeta.Inc()
 			level.Info(rs.logger).Log("msg", "block meta not uploaded yet. Skipping.", "block_uuid", id.String())
 			return nil
 		}
@@ -182,6 +239,7 @@ func (rs *replicationScheme) ensureBlockIsReplicated(ctx context.Context, id uli
 			// If the origin meta file content and target meta file content is
 			// equal, we know we have already successfully replicated
 			// previously.
+			rs.metrics.blocksAlreadyReplicated.Inc()
 			return nil
 		}
 	}
@@ -201,6 +259,8 @@ func (rs *replicationScheme) ensureBlockIsReplicated(ctx context.Context, id uli
 	if err := rs.toBkt.Upload(ctx, metaFile, bytes.NewReader(originMetaFileContent)); err != nil {
 		return err
 	}
+
+	rs.metrics.blocksReplicated.Inc()
 
 	return nil
 }
@@ -236,6 +296,7 @@ func (rs *replicationScheme) ensureObjectReplicated(ctx context.Context, objectN
 	}
 
 	level.Debug(rs.logger).Log("msg", "object replicated", "object", objectName)
+	rs.metrics.objectsReplicated.Inc()
 
 	return nil
 }
