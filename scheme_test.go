@@ -252,6 +252,7 @@ func TestReplicationSchemeAll(t *testing.T) {
 
 		r := newReplicationScheme(
 			testLogger(t.Name()+"/"+c.name),
+			newReplicationMetrics(nil),
 			NewBlockFilter(labels.Selector{
 				labels.NewEqualMatcher("test-labelname", "test-labelvalue"),
 			}).Filter,
