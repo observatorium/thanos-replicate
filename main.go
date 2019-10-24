@@ -117,7 +117,7 @@ func main() {
 
 	metrics := prometheus.NewRegistry()
 	metrics.MustRegister(
-		version.NewCollector("thanos-replicate"),
+		version.NewCollector("thanos_replicate"),
 		prometheus.NewGoCollector(),
 		prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}),
 	)
