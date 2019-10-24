@@ -51,18 +51,20 @@ func testMeta(ulid ulid.ULID) *metadata.Meta {
 		BlockMeta: tsdb.BlockMeta{
 			ULID: ulid,
 			Compaction: tsdb.BlockMetaCompaction{
-				Level: 0,
+				Level: 1,
 			},
 			Version: metadata.MetaVersion1,
 		},
 	}
 }
 
+//nolint:funlen
 func TestReplicationSchemeAll(t *testing.T) {
-	cases := []struct {
-		name    string
-		prepare func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket)
-		assert  func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket)
+	var cases = []struct {
+		name     string
+		selector labels.Selector
+		prepare  func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket)
+		assert   func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket)
 	}{
 		{
 			name:    "EmptyOrigin",
@@ -227,7 +229,7 @@ func TestReplicationSchemeAll(t *testing.T) {
 			prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {
 				ulid := testULID(0)
 				meta := testMeta(ulid)
-				meta.BlockMeta.Compaction.Level = 1
+				meta.BlockMeta.Compaction.Level = 2
 
 				b, err := json.Marshal(meta)
 				testutil.Ok(t, err)
@@ -241,21 +243,70 @@ func TestReplicationSchemeAll(t *testing.T) {
 				}
 			},
 		},
+		{
+			name:     "Regression",
+			selector: labels.Selector{},
+			prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {
+				b := []byte(`{
+        "ulid": "01DQYXMK8G108CEBQ79Y84DYVY",
+        "minTime": 1571911200000,
+        "maxTime": 1571918400000,
+        "stats": {
+                "numSamples": 90793,
+                "numSeries": 3703,
+                "numChunks": 3746
+        },
+        "compaction": {
+                "level": 1,
+                "sources": [
+                        "01DQYXMK8G108CEBQ79Y84DYVY"
+                ]
+        },
+        "version": 1,
+        "thanos": {
+                "labels": {
+                        "receive": "true",
+                        "replica": "thanos-receive-default-0"
+                },
+                "downsample": {
+                        "resolution": 0
+                },
+                "source": "receive"
+        }
+}`)
+
+				_ = originBucket.Upload(ctx, path.Join("01DQYXMK8G108CEBQ79Y84DYVY", "meta.json"), bytes.NewReader(b))
+				_ = originBucket.Upload(ctx, path.Join("01DQYXMK8G108CEBQ79Y84DYVY", "chunks", "000001"), bytes.NewReader(nil))
+				_ = originBucket.Upload(ctx, path.Join("01DQYXMK8G108CEBQ79Y84DYVY", "index"), bytes.NewReader(nil))
+			},
+			assert: func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {
+				if len(targetBucket.Objects()) != 3 {
+					t.Fatal("TargetBucket should have one block does not.")
+				}
+			},
+		},
 	}
 
 	for _, c := range cases {
 		ctx := context.Background()
 		originBucket := inmem.NewBucket()
 		targetBucket := inmem.NewBucket()
+		logger := testLogger(t.Name() + "/" + c.name)
 
 		c.prepare(ctx, t, originBucket, targetBucket)
 
+		selector := labels.Selector{
+			labels.NewEqualMatcher("test-labelname", "test-labelvalue"),
+		}
+		if c.selector != nil {
+			selector = c.selector
+		}
+		filter := NewBlockFilter(logger, selector).Filter
+
 		r := newReplicationScheme(
-			testLogger(t.Name()+"/"+c.name),
+			logger,
 			newReplicationMetrics(nil),
-			NewBlockFilter(labels.Selector{
-				labels.NewEqualMatcher("test-labelname", "test-labelvalue"),
-			}).Filter,
+			filter,
 			originBucket,
 			targetBucket,
 		)

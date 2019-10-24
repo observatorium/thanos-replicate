@@ -104,7 +104,7 @@ func runReplicate(
 	}, []string{"result"})
 	reg.MustRegister(replicationRunCounter)
 
-	blockFilter := NewBlockFilter(labelSelector).Filter
+	blockFilter := NewBlockFilter(logger, labelSelector).Filter
 	metrics := newReplicationMetrics(reg)
 	ctx, cancel := context.WithCancel(context.Background())
 
