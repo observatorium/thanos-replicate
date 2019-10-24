@@ -77,7 +77,8 @@ func runReplicate(
 		return errors.New("No supported bucket was configured to replicate from")
 	}
 
-	fromBkt, err := client.NewBucket(logger, fromConfContentYaml, reg, replicateComponent)
+	fromReg := prometheus.WrapRegistererWith(prometheus.Labels{"replicate": "from"}, reg)
+	fromBkt, err := client.NewBucket(logger, fromConfContentYaml, fromReg, replicateComponent)
 	if err != nil {
 		return err
 	}
@@ -91,7 +92,8 @@ func runReplicate(
 		return errors.New("No supported bucket was configured to replicate to")
 	}
 
-	toBkt, err := client.NewBucket(logger, toConfContentYaml, reg, replicateComponent)
+	toReg := prometheus.WrapRegistererWith(prometheus.Labels{"replicate": "to"}, reg)
+	toBkt, err := client.NewBucket(logger, toConfContentYaml, toReg, replicateComponent)
 	if err != nil {
 		return err
 	}
