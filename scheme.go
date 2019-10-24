@@ -40,21 +40,39 @@ func (b blocks) Swap(i, j int) {
 }
 
 type BlockFilter struct {
+	logger        log.Logger
 	labelSelector labels.Selector
 }
 
-func NewBlockFilter(labelSelector labels.Selector) *BlockFilter {
+func NewBlockFilter(logger log.Logger, labelSelector labels.Selector) *BlockFilter {
 	return &BlockFilter{
 		labelSelector: labelSelector,
+		logger:        logger,
 	}
 }
 
 func (bf *BlockFilter) Filter(b *Block) bool {
 	blockLabels := labels.FromMap(b.Meta.Thanos.Labels)
 
-	return bf.labelSelector.Matches(blockLabels) &&
-		compact.ResolutionLevel(b.Meta.Thanos.Downsample.Resolution) == compact.ResolutionLevelRaw &&
-		b.Meta.Compaction.Level == 0
+	labelMatch := bf.labelSelector.Matches(blockLabels)
+	if !labelMatch {
+		level.Debug(bf.logger).Log("msg", "filtering block", "reason", "labels don't match")
+		return false
+	}
+
+	resolutionMatch := compact.ResolutionLevel(b.Meta.Thanos.Downsample.Resolution) == compact.ResolutionLevelRaw
+	if !resolutionMatch {
+		level.Debug(bf.logger).Log("msg", "filtering block", "reason", "resolutions don't match")
+		return false
+	}
+
+	compactionMatch := b.Meta.Compaction.Level == 1
+	if !compactionMatch {
+		level.Debug(bf.logger).Log("msg", "filtering block", "reason", "compaction levels don't match")
+		return false
+	}
+
+	return true
 }
 
 type blockFilterFunc func(b *Block) bool
