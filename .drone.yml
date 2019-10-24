@@ -24,12 +24,12 @@ steps:
 
 - name: build
   pull: always
-  image: golang:1.12
+  image: golang:1.13
   commands:
   - make thanos-replicate
 
 - name: tags
-  image: golang:1.12
+  image: golang:1.13
   commands:
   - echo -n "$(git rev-parse --abbrev-ref HEAD | tr / -)-$(date +%Y-%m-%d)-$(git rev-parse --short HEAD),latest" > .tags
   when:
