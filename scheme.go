@@ -160,11 +160,9 @@ func (rs *replicationScheme) execute(ctx context.Context) error {
 	err := rs.fromBkt.Iter(ctx, "", func(name string) error {
 		rs.metrics.originIterations.Inc()
 
-		// Strip trailing slash indicating a directory.
-		ulidString := name[:len(name)-1]
-		id, err := ulid.Parse(ulidString)
-		if err != nil {
-			return fmt.Errorf("parse ulid %v: %w", ulidString, err)
+		id, ok := thanosblock.IsBlockDir(name)
+		if !ok {
+			return nil
 		}
 
 		rs.metrics.originMetaLoads.Inc()
