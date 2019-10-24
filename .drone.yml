@@ -9,9 +9,8 @@ platform:
 steps:
 - name: test
   pull: always
-  image: quay.io/coreos/jsonnet-ci:latest
+  image: golang:1.13
   commands:
-  # This step requires >=go1.12 and promtool
   - make test
 
 - name: lint
