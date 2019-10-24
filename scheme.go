@@ -159,6 +159,11 @@ func (rs *replicationScheme) execute(ctx context.Context) error {
 	err := rs.fromBkt.Iter(ctx, "", func(name string) error {
 		rs.metrics.originIterations.Inc()
 
+		if name == "debug" {
+			// This is not a real block, therefore we just skip it.
+			return nil
+		}
+
 		// Strip trailing slash indicating a directory.
 		id, err := ulid.Parse(name[:len(name)-1])
 		if err != nil {
