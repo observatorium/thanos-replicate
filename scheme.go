@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"path"
 	"sort"
@@ -160,9 +161,10 @@ func (rs *replicationScheme) execute(ctx context.Context) error {
 		rs.metrics.originIterations.Inc()
 
 		// Strip trailing slash indicating a directory.
-		id, err := ulid.Parse(name[:len(name)-1])
+		ulidString := name[:len(name)-1]
+		id, err := ulid.Parse(ulidString)
 		if err != nil {
-			return nil
+			return fmt.Errorf("parse ulid %v: %w", ulidString, err)
 		}
 
 		rs.metrics.originMetaLoads.Inc()
@@ -176,7 +178,7 @@ func (rs *replicationScheme) execute(ctx context.Context) error {
 			return nil
 		}
 		if err != nil {
-			return err
+			return fmt.Errorf("load meta for block %v from origin bucket: %w", id.String(), err)
 		}
 
 		level.Debug(rs.logger).Log("msg", "adding block to available blocks", "block_uuid", id.String())
@@ -190,7 +192,7 @@ func (rs *replicationScheme) execute(ctx context.Context) error {
 	})
 
 	if err != nil {
-		return err
+		return fmt.Errorf("iterate over origin bucket: %w", err)
 	}
 
 	candidateBlocks := blocks{}
@@ -208,7 +210,7 @@ func (rs *replicationScheme) execute(ctx context.Context) error {
 
 	for _, b := range candidateBlocks {
 		if err := rs.ensureBlockIsReplicated(ctx, b.ID); err != nil {
-			return err
+			return fmt.Errorf("ensure block %v is replicated: %w", b.ID.String(), err)
 		}
 	}
 
@@ -227,7 +229,7 @@ func (rs *replicationScheme) ensureBlockIsReplicated(ctx context.Context, id uli
 
 	originMetaFile, err := rs.fromBkt.Get(ctx, metaFile)
 	if err != nil {
-		return err
+		return fmt.Errorf("get meta file from origin bucket: %w", err)
 	}
 
 	defer originMetaFile.Close()
@@ -238,19 +240,19 @@ func (rs *replicationScheme) ensureBlockIsReplicated(ctx context.Context, id uli
 	}
 
 	if err != nil && !rs.toBkt.IsObjNotFoundErr(err) {
-		return err
+		return fmt.Errorf("get meta file from target bucket: %w", err)
 	}
 
 	var originMetaFileContent, targetMetaFileContent []byte
 	if targetMetaFile != nil && !rs.toBkt.IsObjNotFoundErr(err) {
 		originMetaFileContent, err = ioutil.ReadAll(originMetaFile)
 		if err != nil {
-			return err
+			return fmt.Errorf("read origin meta file: %w", err)
 		}
 
 		targetMetaFileContent, err = ioutil.ReadAll(targetMetaFile)
 		if err != nil {
-			return err
+			return fmt.Errorf("read target meta file: %w", err)
 		}
 
 		if bytes.Equal(originMetaFileContent, targetMetaFileContent) {
@@ -263,19 +265,24 @@ func (rs *replicationScheme) ensureBlockIsReplicated(ctx context.Context, id uli
 	}
 
 	if err := rs.fromBkt.Iter(ctx, chunksDir, func(objectName string) error {
-		return rs.ensureObjectReplicated(ctx, objectName)
+		err := rs.ensureObjectReplicated(ctx, objectName)
+		if err != nil {
+			return fmt.Errorf("replicate object %v: %w", objectName, err)
+		}
+
+		return nil
 	}); err != nil {
 		return err
 	}
 
 	if err := rs.ensureObjectReplicated(ctx, indexFile); err != nil {
-		return err
+		return fmt.Errorf("replicate index file: %w", err)
 	}
 
 	level.Debug(rs.logger).Log("msg", "replicating meta file", "object", metaFile)
 
 	if err := rs.toBkt.Upload(ctx, metaFile, bytes.NewReader(originMetaFileContent)); err != nil {
-		return err
+		return fmt.Errorf("upload meta file: %w", err)
 	}
 
 	rs.metrics.blocksReplicated.Inc()
@@ -290,7 +297,7 @@ func (rs *replicationScheme) ensureObjectReplicated(ctx context.Context, objectN
 
 	exists, err := rs.toBkt.Exists(ctx, objectName)
 	if err != nil {
-		return err
+		return fmt.Errorf("check if %v exists in target bucket: %w", objectName, err)
 	}
 
 	// skip if already exists
@@ -303,14 +310,14 @@ func (rs *replicationScheme) ensureObjectReplicated(ctx context.Context, objectN
 
 	r, err := rs.fromBkt.Get(ctx, objectName)
 	if err != nil {
-		return err
+		return fmt.Errorf("get %v from origin bucket: %w", objectName, err)
 	}
 
 	defer r.Close()
 
 	err = rs.toBkt.Upload(ctx, objectName, r)
 	if err != nil {
-		return err
+		return fmt.Errorf("upload %v to target bucket: %w", objectName, err)
 	}
 
 	level.Debug(rs.logger).Log("msg", "object replicated", "object", objectName)
@@ -329,23 +336,23 @@ func loadMeta(ctx context.Context, bucket objstore.BucketReader, id ulid.ULID) (
 
 	r, err := bucket.Get(ctx, src)
 	if bucket.IsObjNotFoundErr(err) {
-		return nil, true, err
+		return nil, true, fmt.Errorf("get meta file: %w", err)
 	}
 
 	if err != nil {
-		return nil, false, err
+		return nil, false, fmt.Errorf("get meta file: %w", err)
 	}
 
 	defer r.Close()
 
 	metaContent, err := ioutil.ReadAll(r)
 	if err != nil {
-		return nil, false, err
+		return nil, false, fmt.Errorf("read meta file: %w", err)
 	}
 
 	var m metadata.Meta
 	if err := json.Unmarshal(metaContent, &m); err != nil {
-		return nil, true, err
+		return nil, true, fmt.Errorf("unmarshal meta: %w", err)
 	}
 
 	if m.Version != metadata.MetaVersion1 {
