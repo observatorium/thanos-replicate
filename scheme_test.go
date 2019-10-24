@@ -58,194 +58,196 @@ func testMeta(ulid ulid.ULID) *metadata.Meta {
 	}
 }
 
-var cases = []struct {
-	name     string
-	selector labels.Selector
-	prepare  func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket)
-	assert   func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket)
-}{
-	{
-		name:    "EmptyOrigin",
-		prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {},
-		assert:  func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {},
-	},
-	{
-		name: "NoMeta",
-		prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {
-			_ = originBucket.Upload(ctx, path.Join(testULID(0).String(), "chunks", "000001"), bytes.NewReader(nil))
+//nolint:funlen
+func TestReplicationSchemeAll(t *testing.T) {
+	var cases = []struct {
+		name     string
+		selector labels.Selector
+		prepare  func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket)
+		assert   func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket)
+	}{
+		{
+			name:    "EmptyOrigin",
+			prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {},
+			assert:  func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {},
 		},
-		assert: func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {
-			if len(targetBucket.Objects()) != 0 {
-				t.Fatal("TargetBucket should have been empty but is not.")
-			}
-		},
-	},
-	{
-		name: "PartialMeta",
-		prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {
-			_ = originBucket.Upload(ctx, path.Join(testULID(0).String(), "meta.json"), bytes.NewReader([]byte("{")))
-		},
-		assert: func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {
-			if len(targetBucket.Objects()) != 0 {
-				t.Fatal("TargetBucket should have been empty but is not.")
-			}
-		},
-	},
-	{
-		name: "FullBlock",
-		prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {
-			ulid := testULID(0)
-			meta := testMeta(ulid)
-
-			b, err := json.Marshal(meta)
-			testutil.Ok(t, err)
-			_ = originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
-			_ = originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
-			_ = originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
-		},
-		assert: func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {
-			if len(targetBucket.Objects()) != 3 {
-				t.Fatal("TargetBucket should have one block made up of three objects replicated.")
-			}
-		},
-	},
-	{
-		name: "PreviousPartialUpload",
-		prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {
-			ulid := testULID(0)
-			meta := testMeta(ulid)
-
-			b, err := json.Marshal(meta)
-			testutil.Ok(t, err)
-			_ = originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
-			_ = originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
-			_ = originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
-
-			_ = targetBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), io.LimitReader(bytes.NewReader(b), int64(len(b)-10)))
-			_ = targetBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
-			_ = targetBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
-		},
-		assert: func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {
-			for k := range originBucket.Objects() {
-				if !bytes.Equal(originBucket.Objects()[k], targetBucket.Objects()[k]) {
-					t.Fatalf("Object %s not equal in origin and target bucket.", k)
+		{
+			name: "NoMeta",
+			prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {
+				_ = originBucket.Upload(ctx, path.Join(testULID(0).String(), "chunks", "000001"), bytes.NewReader(nil))
+			},
+			assert: func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {
+				if len(targetBucket.Objects()) != 0 {
+					t.Fatal("TargetBucket should have been empty but is not.")
 				}
-			}
+			},
 		},
-	},
-	{
-		name: "OnlyUploadsRaw",
-		prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {
-			ulid := testULID(0)
-			meta := testMeta(ulid)
-
-			b, err := json.Marshal(meta)
-			testutil.Ok(t, err)
-			_ = originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
-			_ = originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
-			_ = originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
-
-			ulid = testULID(1)
-			meta = testMeta(ulid)
-			meta.Thanos.Downsample.Resolution = int64(compact.ResolutionLevel5m)
-
-			b, err = json.Marshal(meta)
-			testutil.Ok(t, err)
-			_ = originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
-			_ = originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
-			_ = originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
+		{
+			name: "PartialMeta",
+			prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {
+				_ = originBucket.Upload(ctx, path.Join(testULID(0).String(), "meta.json"), bytes.NewReader([]byte("{")))
+			},
+			assert: func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {
+				if len(targetBucket.Objects()) != 0 {
+					t.Fatal("TargetBucket should have been empty but is not.")
+				}
+			},
 		},
-		assert: func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {
-			expected := 3
-			got := len(targetBucket.Objects())
-			if got != expected {
-				t.Fatalf("TargetBucket should have one block made up of three objects replicated. Got %d but expected %d objects.", got, expected)
-			}
-		},
-	},
-	{
-		name: "UploadMultipleCandidatesWhenPresent",
-		prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {
-			ulid := testULID(0)
-			meta := testMeta(ulid)
+		{
+			name: "FullBlock",
+			prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {
+				ulid := testULID(0)
+				meta := testMeta(ulid)
 
-			b, err := json.Marshal(meta)
-			testutil.Ok(t, err)
-			_ = originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
-			_ = originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
-			_ = originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
-
-			ulid = testULID(1)
-			meta = testMeta(ulid)
-
-			b, err = json.Marshal(meta)
-			testutil.Ok(t, err)
-			_ = originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
-			_ = originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
-			_ = originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
+				b, err := json.Marshal(meta)
+				testutil.Ok(t, err)
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
+			},
+			assert: func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {
+				if len(targetBucket.Objects()) != 3 {
+					t.Fatal("TargetBucket should have one block made up of three objects replicated.")
+				}
+			},
 		},
-		assert: func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {
-			expected := 6
-			got := len(targetBucket.Objects())
-			if got != expected {
-				t.Fatalf("TargetBucket should have two blocks made up of three objects replicated. Got %d but expected %d objects.", got, expected)
-			}
-		},
-	},
-	{
-		name: "LabelSelector",
-		prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {
-			ulid := testULID(0)
-			meta := testMeta(ulid)
+		{
+			name: "PreviousPartialUpload",
+			prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {
+				ulid := testULID(0)
+				meta := testMeta(ulid)
 
-			b, err := json.Marshal(meta)
-			testutil.Ok(t, err)
-			_ = originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
-			_ = originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
-			_ = originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
+				b, err := json.Marshal(meta)
+				testutil.Ok(t, err)
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
 
-			ulid = testULID(1)
-			meta = testMeta(ulid)
-			meta.Thanos.Labels["test-labelname"] = "non-selected-value"
+				_ = targetBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), io.LimitReader(bytes.NewReader(b), int64(len(b)-10)))
+				_ = targetBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
+				_ = targetBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
+			},
+			assert: func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {
+				for k := range originBucket.Objects() {
+					if !bytes.Equal(originBucket.Objects()[k], targetBucket.Objects()[k]) {
+						t.Fatalf("Object %s not equal in origin and target bucket.", k)
+					}
+				}
+			},
+		},
+		{
+			name: "OnlyUploadsRaw",
+			prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {
+				ulid := testULID(0)
+				meta := testMeta(ulid)
 
-			b, err = json.Marshal(meta)
-			testutil.Ok(t, err)
-			_ = originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
-			_ = originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
-			_ = originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
-		},
-		assert: func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {
-			expected := 3
-			got := len(targetBucket.Objects())
-			if got != expected {
-				t.Fatalf("TargetBucket should have one block made up of three objects replicated. Got %d but expected %d objects.", got, expected)
-			}
-		},
-	},
-	{
-		name: "NonZeroCompaction",
-		prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {
-			ulid := testULID(0)
-			meta := testMeta(ulid)
-			meta.BlockMeta.Compaction.Level = 2
+				b, err := json.Marshal(meta)
+				testutil.Ok(t, err)
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
 
-			b, err := json.Marshal(meta)
-			testutil.Ok(t, err)
-			_ = originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
-			_ = originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
-			_ = originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
+				ulid = testULID(1)
+				meta = testMeta(ulid)
+				meta.Thanos.Downsample.Resolution = int64(compact.ResolutionLevel5m)
+
+				b, err = json.Marshal(meta)
+				testutil.Ok(t, err)
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
+			},
+			assert: func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {
+				expected := 3
+				got := len(targetBucket.Objects())
+				if got != expected {
+					t.Fatalf("TargetBucket should have one block made up of three objects replicated. Got %d but expected %d objects.", got, expected)
+				}
+			},
 		},
-		assert: func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {
-			if len(targetBucket.Objects()) != 0 {
-				t.Fatal("TargetBucket should have been empty but is not.")
-			}
+		{
+			name: "UploadMultipleCandidatesWhenPresent",
+			prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {
+				ulid := testULID(0)
+				meta := testMeta(ulid)
+
+				b, err := json.Marshal(meta)
+				testutil.Ok(t, err)
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
+
+				ulid = testULID(1)
+				meta = testMeta(ulid)
+
+				b, err = json.Marshal(meta)
+				testutil.Ok(t, err)
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
+			},
+			assert: func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {
+				expected := 6
+				got := len(targetBucket.Objects())
+				if got != expected {
+					t.Fatalf("TargetBucket should have two blocks made up of three objects replicated. Got %d but expected %d objects.", got, expected)
+				}
+			},
 		},
-	},
-	{
-		name:     "Regression",
-		selector: labels.Selector{},
-		prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {
-			b := []byte(`{
+		{
+			name: "LabelSelector",
+			prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {
+				ulid := testULID(0)
+				meta := testMeta(ulid)
+
+				b, err := json.Marshal(meta)
+				testutil.Ok(t, err)
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
+
+				ulid = testULID(1)
+				meta = testMeta(ulid)
+				meta.Thanos.Labels["test-labelname"] = "non-selected-value"
+
+				b, err = json.Marshal(meta)
+				testutil.Ok(t, err)
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
+			},
+			assert: func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {
+				expected := 3
+				got := len(targetBucket.Objects())
+				if got != expected {
+					t.Fatalf("TargetBucket should have one block made up of three objects replicated. Got %d but expected %d objects.", got, expected)
+				}
+			},
+		},
+		{
+			name: "NonZeroCompaction",
+			prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {
+				ulid := testULID(0)
+				meta := testMeta(ulid)
+				meta.BlockMeta.Compaction.Level = 2
+
+				b, err := json.Marshal(meta)
+				testutil.Ok(t, err)
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "meta.json"), bytes.NewReader(b))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "chunks", "000001"), bytes.NewReader(nil))
+				_ = originBucket.Upload(ctx, path.Join(ulid.String(), "index"), bytes.NewReader(nil))
+			},
+			assert: func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {
+				if len(targetBucket.Objects()) != 0 {
+					t.Fatal("TargetBucket should have been empty but is not.")
+				}
+			},
+		},
+		{
+			name:     "Regression",
+			selector: labels.Selector{},
+			prepare: func(ctx context.Context, t *testing.T, originBucket, targetBucket objstore.Bucket) {
+				b := []byte(`{
         "ulid": "01DQYXMK8G108CEBQ79Y84DYVY",
         "minTime": 1571911200000,
         "maxTime": 1571918400000,
@@ -273,19 +275,18 @@ var cases = []struct {
         }
 }`)
 
-			_ = originBucket.Upload(ctx, path.Join("01DQYXMK8G108CEBQ79Y84DYVY", "meta.json"), bytes.NewReader(b))
-			_ = originBucket.Upload(ctx, path.Join("01DQYXMK8G108CEBQ79Y84DYVY", "chunks", "000001"), bytes.NewReader(nil))
-			_ = originBucket.Upload(ctx, path.Join("01DQYXMK8G108CEBQ79Y84DYVY", "index"), bytes.NewReader(nil))
+				_ = originBucket.Upload(ctx, path.Join("01DQYXMK8G108CEBQ79Y84DYVY", "meta.json"), bytes.NewReader(b))
+				_ = originBucket.Upload(ctx, path.Join("01DQYXMK8G108CEBQ79Y84DYVY", "chunks", "000001"), bytes.NewReader(nil))
+				_ = originBucket.Upload(ctx, path.Join("01DQYXMK8G108CEBQ79Y84DYVY", "index"), bytes.NewReader(nil))
+			},
+			assert: func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {
+				if len(targetBucket.Objects()) != 3 {
+					t.Fatal("TargetBucket should have one block does not.")
+				}
+			},
 		},
-		assert: func(ctx context.Context, t *testing.T, originBucket, targetBucket *inmem.Bucket) {
-			if len(targetBucket.Objects()) != 3 {
-				t.Fatal("TargetBucket should have one block does not.")
-			}
-		},
-	},
-}
+	}
 
-func TestReplicationSchemeAll(t *testing.T) {
 	for _, c := range cases {
 		ctx := context.Background()
 		originBucket := inmem.NewBucket()
