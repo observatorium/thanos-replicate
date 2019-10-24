@@ -161,9 +161,10 @@ func (rs *replicationScheme) execute(ctx context.Context) error {
 		rs.metrics.originIterations.Inc()
 
 		// Strip trailing slash indicating a directory.
-		id, err := ulid.Parse(name[:len(name)-1])
+		ulidString := name[:len(name)-1]
+		id, err := ulid.Parse(ulidString)
 		if err != nil {
-			return fmt.Errorf("parse ulid %v: %w", name[:len(name)-1], err)
+			return fmt.Errorf("parse ulid %v: %w", ulidString, err)
 		}
 
 		rs.metrics.originMetaLoads.Inc()
