@@ -163,7 +163,7 @@ func (rs *replicationScheme) execute(ctx context.Context) error {
 		// Strip trailing slash indicating a directory.
 		id, err := ulid.Parse(name[:len(name)-1])
 		if err != nil {
-			return fmt.Errorf("parse ulid: %w", err)
+			return fmt.Errorf("parse ulid %v: %w", name[:len(name)-1], err)
 		}
 
 		rs.metrics.originMetaLoads.Inc()
@@ -177,7 +177,7 @@ func (rs *replicationScheme) execute(ctx context.Context) error {
 			return nil
 		}
 		if err != nil {
-			return fmt.Errorf("load meta from origin bucket: %w", err)
+			return fmt.Errorf("load meta for block %v from origin bucket: %w", id.String(), err)
 		}
 
 		level.Debug(rs.logger).Log("msg", "adding block to available blocks", "block_uuid", id.String())
