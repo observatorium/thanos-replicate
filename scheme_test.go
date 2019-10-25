@@ -283,6 +283,10 @@ func TestReplicationSchemeAll(t *testing.T) {
 				if len(targetBucket.Objects()) != 3 {
 					t.Fatal("TargetBucket should have one block does not.")
 				}
+
+				expected := originBucket.Objects()["01DQYXMK8G108CEBQ79Y84DYVY/meta.json"]
+				got := targetBucket.Objects()["01DQYXMK8G108CEBQ79Y84DYVY/meta.json"]
+				testutil.Equals(t, expected, got)
 			},
 		},
 	}
