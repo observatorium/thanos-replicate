@@ -221,14 +221,13 @@ func (rs *replicationScheme) ensureBlockIsReplicated(ctx context.Context, id uli
 		return fmt.Errorf("get meta file from target bucket: %w", err)
 	}
 
-	var originMetaFileContent, targetMetaFileContent []byte
-	if targetMetaFile != nil && !rs.toBkt.IsObjNotFoundErr(err) {
-		originMetaFileContent, err = ioutil.ReadAll(originMetaFile)
-		if err != nil {
-			return fmt.Errorf("read origin meta file: %w", err)
-		}
+	originMetaFileContent, err := ioutil.ReadAll(originMetaFile)
+	if err != nil {
+		return fmt.Errorf("read origin meta file: %w", err)
+	}
 
-		targetMetaFileContent, err = ioutil.ReadAll(targetMetaFile)
+	if targetMetaFile != nil && !rs.toBkt.IsObjNotFoundErr(err) {
+		targetMetaFileContent, err := ioutil.ReadAll(targetMetaFile)
 		if err != nil {
 			return fmt.Errorf("read target meta file: %w", err)
 		}
