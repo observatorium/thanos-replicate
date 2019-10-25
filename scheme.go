@@ -21,25 +21,6 @@ import (
 	"github.com/thanos-io/thanos/pkg/objstore"
 )
 
-type Block struct {
-	ID   ulid.ULID
-	Meta *metadata.Meta
-}
-
-type blocks []*Block
-
-func (b blocks) Len() int {
-	return len(b)
-}
-
-func (b blocks) Less(i, j int) bool {
-	return b[i].Meta.MinTime < b[j].Meta.MinTime
-}
-
-func (b blocks) Swap(i, j int) {
-	b[i], b[j] = b[j], b[i]
-}
-
 type BlockFilter struct {
 	logger        log.Logger
 	labelSelector labels.Selector
@@ -52,8 +33,8 @@ func NewBlockFilter(logger log.Logger, labelSelector labels.Selector) *BlockFilt
 	}
 }
 
-func (bf *BlockFilter) Filter(b *Block) bool {
-	blockLabels := labels.FromMap(b.Meta.Thanos.Labels)
+func (bf *BlockFilter) Filter(b *metadata.Meta) bool {
+	blockLabels := labels.FromMap(b.Thanos.Labels)
 
 	labelMatch := bf.labelSelector.Matches(blockLabels)
 	if !labelMatch {
@@ -61,13 +42,13 @@ func (bf *BlockFilter) Filter(b *Block) bool {
 		return false
 	}
 
-	resolutionMatch := compact.ResolutionLevel(b.Meta.Thanos.Downsample.Resolution) == compact.ResolutionLevelRaw
+	resolutionMatch := compact.ResolutionLevel(b.Thanos.Downsample.Resolution) == compact.ResolutionLevelRaw
 	if !resolutionMatch {
 		level.Debug(bf.logger).Log("msg", "filtering block", "reason", "resolutions don't match")
 		return false
 	}
 
-	compactionMatch := b.Meta.Compaction.Level == 1
+	compactionMatch := b.BlockMeta.Compaction.Level == 1
 	if !compactionMatch {
 		level.Debug(bf.logger).Log("msg", "filtering block", "reason", "compaction levels don't match")
 		return false
@@ -76,7 +57,7 @@ func (bf *BlockFilter) Filter(b *Block) bool {
 	return true
 }
 
-type blockFilterFunc func(b *Block) bool
+type blockFilterFunc func(b *metadata.Meta) bool
 
 type replicationScheme struct {
 	fromBkt objstore.BucketReader
@@ -153,7 +134,7 @@ func newReplicationScheme(logger log.Logger, metrics *replicationMetrics, blockF
 }
 
 func (rs *replicationScheme) execute(ctx context.Context) error {
-	availableBlocks := blocks{}
+	availableBlocks := []*metadata.Meta{}
 
 	level.Debug(rs.logger).Log("msg", "scanning blocks available blocks for replication")
 
@@ -181,10 +162,7 @@ func (rs *replicationScheme) execute(ctx context.Context) error {
 
 		level.Debug(rs.logger).Log("msg", "adding block to available blocks", "block_uuid", id.String())
 
-		availableBlocks = append(availableBlocks, &Block{
-			ID:   id,
-			Meta: meta,
-		})
+		availableBlocks = append(availableBlocks, meta)
 
 		return nil
 	})
@@ -193,22 +171,24 @@ func (rs *replicationScheme) execute(ctx context.Context) error {
 		return fmt.Errorf("iterate over origin bucket: %w", err)
 	}
 
-	candidateBlocks := blocks{}
+	candidateBlocks := []*metadata.Meta{}
 
 	for _, b := range availableBlocks {
 		if rs.blockFilter(b) {
-			level.Debug(rs.logger).Log("msg", "adding block to candidate blocks", "block_uuid", b.ID.String())
+			level.Debug(rs.logger).Log("msg", "adding block to candidate blocks", "block_uuid", b.BlockMeta.ULID.String())
 			candidateBlocks = append(candidateBlocks, b)
 		}
 	}
 
 	// In order to prevent races in compactions by the target environment, we
 	// need to replicate oldest start timestamp first.
-	sort.Sort(sort.Reverse(candidateBlocks))
+	sort.Slice(candidateBlocks, func(i, j int) bool {
+		return candidateBlocks[i].BlockMeta.MinTime < candidateBlocks[j].BlockMeta.MinTime
+	})
 
 	for _, b := range candidateBlocks {
-		if err := rs.ensureBlockIsReplicated(ctx, b.ID); err != nil {
-			return fmt.Errorf("ensure block %v is replicated: %w", b.ID.String(), err)
+		if err := rs.ensureBlockIsReplicated(ctx, b.BlockMeta.ULID); err != nil {
+			return fmt.Errorf("ensure block %v is replicated: %w", b.BlockMeta.ULID.String(), err)
 		}
 	}
 
