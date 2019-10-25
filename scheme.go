@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"path"
 	"sort"
@@ -217,7 +218,7 @@ func (rs *replicationScheme) ensureBlockIsReplicated(ctx context.Context, id uli
 		defer targetMetaFile.Close()
 	}
 
-	if err != nil && !rs.toBkt.IsObjNotFoundErr(err) {
+	if err != nil && !rs.toBkt.IsObjNotFoundErr(err) && err != io.EOF {
 		return fmt.Errorf("get meta file from target bucket: %w", err)
 	}
 
@@ -236,6 +237,7 @@ func (rs *replicationScheme) ensureBlockIsReplicated(ctx context.Context, id uli
 			// If the origin meta file content and target meta file content is
 			// equal, we know we have already successfully replicated
 			// previously.
+			level.Debug(rs.logger).Log("msg", "skipping block as already replicated", "block_uuid", id.String())
 			rs.metrics.blocksAlreadyReplicated.Inc()
 			return nil
 		}
