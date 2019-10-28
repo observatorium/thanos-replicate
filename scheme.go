@@ -20,21 +20,25 @@ import (
 	"github.com/thanos-io/thanos/pkg/block/metadata"
 	"github.com/thanos-io/thanos/pkg/compact"
 	"github.com/thanos-io/thanos/pkg/objstore"
+	"github.com/thanos-io/thanos/pkg/runutil"
 )
 
-type BlockFilter struct {
+// NonCompactedBlockFilter is block filter that filters out compacted and unselected blocks.
+type NonCompactedBlockFilter struct {
 	logger        log.Logger
 	labelSelector labels.Selector
 }
 
-func NewBlockFilter(logger log.Logger, labelSelector labels.Selector) *BlockFilter {
-	return &BlockFilter{
+// NewNonCompactedBlockFilter returns block filter.
+func NewNonCompactedBlockFilter(logger log.Logger, labelSelector labels.Selector) *NonCompactedBlockFilter {
+	return &NonCompactedBlockFilter{
 		labelSelector: labelSelector,
 		logger:        logger,
 	}
 }
 
-func (bf *BlockFilter) Filter(b *metadata.Meta) bool {
+// Filter return true if block is non-compacted and matches selector.
+func (bf *NonCompactedBlockFilter) Filter(b *metadata.Meta) bool {
 	blockLabels := labels.FromMap(b.Thanos.Labels)
 
 	labelMatch := bf.labelSelector.Matches(blockLabels)
@@ -139,7 +143,7 @@ func (rs *replicationScheme) execute(ctx context.Context) error {
 
 	level.Debug(rs.logger).Log("msg", "scanning blocks available blocks for replication")
 
-	err := rs.fromBkt.Iter(ctx, "", func(name string) error {
+	if err := rs.fromBkt.Iter(ctx, "", func(name string) error {
 		rs.metrics.originIterations.Inc()
 
 		id, ok := thanosblock.IsBlockDir(name)
@@ -161,14 +165,18 @@ func (rs *replicationScheme) execute(ctx context.Context) error {
 			return fmt.Errorf("load meta for block %v from origin bucket: %w", id.String(), err)
 		}
 
+		if len(meta.Thanos.Labels) == 0 {
+			// TODO(bwplotka): Allow injecting custom labels as shipper does.
+			level.Info(rs.logger).Log("msg", "block meta without Thanos external labels set. This is not allowed. Skipping.", "block_uuid", id.String())
+			return nil
+		}
+
 		level.Debug(rs.logger).Log("msg", "adding block to available blocks", "block_uuid", id.String())
 
 		availableBlocks = append(availableBlocks, meta)
 
 		return nil
-	})
-
-	if err != nil {
+	}); err != nil {
 		return fmt.Errorf("iterate over origin bucket: %w", err)
 	}
 
@@ -211,11 +219,11 @@ func (rs *replicationScheme) ensureBlockIsReplicated(ctx context.Context, id uli
 		return fmt.Errorf("get meta file from origin bucket: %w", err)
 	}
 
-	defer originMetaFile.Close()
+	defer runutil.CloseWithLogOnErr(rs.logger, originMetaFile, "close original meta file")
 
 	targetMetaFile, err := rs.toBkt.Get(ctx, metaFile)
 	if targetMetaFile != nil {
-		defer targetMetaFile.Close()
+		defer runutil.CloseWithLogOnErr(rs.logger, targetMetaFile, "close target meta file")
 	}
 
 	if err != nil && !rs.toBkt.IsObjNotFoundErr(err) && err != io.EOF {
@@ -294,12 +302,11 @@ func (rs *replicationScheme) ensureObjectReplicated(ctx context.Context, objectN
 
 	defer r.Close()
 
-	err = rs.toBkt.Upload(ctx, objectName, r)
-	if err != nil {
+	if err = rs.toBkt.Upload(ctx, objectName, r); err != nil {
 		return fmt.Errorf("upload %v to target bucket: %w", objectName, err)
 	}
 
-	level.Debug(rs.logger).Log("msg", "object replicated", "object", objectName)
+	level.Info(rs.logger).Log("msg", "object replicated", "object", objectName)
 	rs.metrics.objectsReplicated.Inc()
 
 	return nil
