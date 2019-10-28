@@ -85,8 +85,12 @@ func runReplicate(
 		return errors.New("No supported bucket was configured to replicate from")
 	}
 
-	fromReg := prometheus.WrapRegistererWith(prometheus.Labels{"replicate": "from"}, reg)
-	fromBkt, err := client.NewBucket(logger, fromConfContentYaml, fromReg, replicateComponent)
+	fromBkt, err := client.NewBucket(
+		logger,
+		fromConfContentYaml,
+		prometheus.WrapRegistererWith(prometheus.Labels{"replicate": "from"}, reg),
+		replicateComponent,
+	)
 	if err != nil {
 		return err
 	}
@@ -100,8 +104,12 @@ func runReplicate(
 		return errors.New("No supported bucket was configured to replicate to")
 	}
 
-	toReg := prometheus.WrapRegistererWith(prometheus.Labels{"replicate": "to"}, reg)
-	toBkt, err := client.NewBucket(logger, toConfContentYaml, toReg, replicateComponent)
+	toBkt, err := client.NewBucket(
+		logger,
+		toConfContentYaml,
+		prometheus.WrapRegistererWith(prometheus.Labels{"replicate": "to"}, reg),
+		replicateComponent,
+	)
 	if err != nil {
 		return err
 	}
@@ -119,16 +127,19 @@ func runReplicate(
 	replicateFn := func() error {
 		timestamp := time.Now()
 		entropy := ulid.Monotonic(rand.New(rand.NewSource(timestamp.UnixNano())), 0)
+
 		ulid, err := ulid.New(ulid.Timestamp(timestamp), entropy)
 		if err != nil {
 			return errors.Wrap(err, "generate replication run-id")
 		}
-		logger := log.With(logger, "replication-run-id", ulid.String())
 
+		logger := log.With(logger, "replication-run-id", ulid.String())
 		level.Info(logger).Log("msg", "running replication attempt")
-		if err = newReplicationScheme(logger, metrics, blockFilter, fromBkt, toBkt).execute(ctx); err != nil {
+
+		if err := newReplicationScheme(logger, metrics, blockFilter, fromBkt, toBkt).execute(ctx); err != nil {
 			return fmt.Errorf("replication execute: %w", err)
 		}
+
 		return nil
 	}
 
@@ -144,11 +155,13 @@ func runReplicate(
 			if err := replicateFn(); err != nil {
 				level.Error(logger).Log("msg", "running replication failed", "err", err)
 				replicationRunCounter.WithLabelValues("error").Inc()
+
 				// No matter the error we want to repeat indefinitely.
 				return nil
 			}
 			replicationRunCounter.WithLabelValues("success").Inc()
 			level.Info(logger).Log("msg", "ran replication successfully")
+
 			return nil
 		})
 	}, func(error) {

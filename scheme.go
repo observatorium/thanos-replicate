@@ -247,6 +247,7 @@ func (rs *replicationScheme) ensureBlockIsReplicated(ctx context.Context, id uli
 			// previously.
 			level.Debug(rs.logger).Log("msg", "skipping block as already replicated", "block_uuid", id.String())
 			rs.metrics.blocksAlreadyReplicated.Inc()
+
 			return nil
 		}
 	}
