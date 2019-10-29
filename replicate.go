@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"time"
 
@@ -21,15 +22,20 @@ import (
 
 const replicateComponent = "replicate"
 
+// TODO(bwplotka): Consider moving to Thanos. Consider adding --labels to add to meta.json if empty to match shipper
+// logic: https://github.com/observatorium/thanos-replicate/issues/7.
 func registerReplicate(m map[string]setupFunc, app *kingpin.Application, name string) {
 	cmd := app.Command(name, "Runs replication as a long running daemon.")
 
 	httpMetricsBindAddr := regHTTPAddrFlag(cmd)
 
+	// TODO(bwplotka): Add support for local filesystem bucket implementation.
 	fromObjStoreConfig := regCommonObjStoreFlags(cmd, "from", false)
 	toObjStoreConfig := regCommonObjStoreFlags(cmd, "to", false)
 
 	matcherStrs := cmd.Flag("matcher", "Only blocks whose labels match this matcher will be replicated.").PlaceHolder("key=\"value\"").Strings()
+
+	singleRun := cmd.Flag("single-run", "Run replication only one time, then exit.").Default("false").Bool()
 
 	m[name] = func(g *run.Group, logger log.Logger, reg *prometheus.Registry, tracer opentracing.Tracer, _ bool) error {
 		matchers, err := parseFlagMatchers(*matcherStrs)
@@ -43,9 +49,10 @@ func registerReplicate(m map[string]setupFunc, app *kingpin.Application, name st
 			reg,
 			tracer,
 			*httpMetricsBindAddr,
-			labels.Selector(matchers),
+			matchers,
 			fromObjStoreConfig,
 			toObjStoreConfig,
+			*singleRun,
 		)
 	}
 }
@@ -59,6 +66,7 @@ func runReplicate(
 	labelSelector labels.Selector,
 	fromObjStoreConfig *extflag.PathOrContent,
 	toObjStoreConfig *extflag.PathOrContent,
+	singleRun bool,
 ) error {
 	logger = log.With(logger, "component", "replicate")
 
@@ -77,8 +85,12 @@ func runReplicate(
 		return errors.New("No supported bucket was configured to replicate from")
 	}
 
-	fromReg := prometheus.WrapRegistererWith(prometheus.Labels{"replicate": "from"}, reg)
-	fromBkt, err := client.NewBucket(logger, fromConfContentYaml, fromReg, replicateComponent)
+	fromBkt, err := client.NewBucket(
+		logger,
+		fromConfContentYaml,
+		prometheus.WrapRegistererWith(prometheus.Labels{"replicate": "from"}, reg),
+		replicateComponent,
+	)
 	if err != nil {
 		return err
 	}
@@ -92,8 +104,12 @@ func runReplicate(
 		return errors.New("No supported bucket was configured to replicate to")
 	}
 
-	toReg := prometheus.WrapRegistererWith(prometheus.Labels{"replicate": "to"}, reg)
-	toBkt, err := client.NewBucket(logger, toConfContentYaml, toReg, replicateComponent)
+	toBkt, err := client.NewBucket(
+		logger,
+		toConfContentYaml,
+		prometheus.WrapRegistererWith(prometheus.Labels{"replicate": "to"}, reg),
+		replicateComponent,
+	)
 	if err != nil {
 		return err
 	}
@@ -104,35 +120,48 @@ func runReplicate(
 	}, []string{"result"})
 	reg.MustRegister(replicationRunCounter)
 
-	blockFilter := NewBlockFilter(logger, labelSelector).Filter
+	blockFilter := NewNonCompactedBlockFilter(logger, labelSelector).Filter
 	metrics := newReplicationMetrics(reg)
 	ctx, cancel := context.WithCancel(context.Background())
+
+	replicateFn := func() error {
+		timestamp := time.Now()
+		entropy := ulid.Monotonic(rand.New(rand.NewSource(timestamp.UnixNano())), 0)
+
+		ulid, err := ulid.New(ulid.Timestamp(timestamp), entropy)
+		if err != nil {
+			return errors.Wrap(err, "generate replication run-id")
+		}
+
+		logger := log.With(logger, "replication-run-id", ulid.String())
+		level.Info(logger).Log("msg", "running replication attempt")
+
+		if err := newReplicationScheme(logger, metrics, blockFilter, fromBkt, toBkt).execute(ctx); err != nil {
+			return fmt.Errorf("replication execute: %w", err)
+		}
+
+		return nil
+	}
 
 	g.Add(func() error {
 		defer runutil.CloseWithLogOnErr(logger, fromBkt, "from bucket client")
 		defer runutil.CloseWithLogOnErr(logger, toBkt, "to bucket client")
 
-		return runutil.Repeat(time.Minute, ctx.Done(), func() error {
-			timestamp := time.Now()
-			entropy := ulid.Monotonic(rand.New(rand.NewSource(timestamp.UnixNano())), 0)
-			ulid, err := ulid.New(ulid.Timestamp(timestamp), entropy)
-			if err != nil {
-				return errors.Wrap(err, "generate replication run-id")
-			}
-			logger := log.With(logger, "replication-run-id", ulid.String())
+		if singleRun {
+			return replicateFn()
+		}
 
-			level.Info(logger).Log("msg", "running replication attempt")
-			err = newReplicationScheme(logger, metrics, blockFilter, fromBkt, toBkt).execute(ctx)
-			if err != nil {
-				level.Error(logger).Log("msg", "running replicaton failed", "err", err)
+		return runutil.Repeat(time.Minute, ctx.Done(), func() error {
+			if err := replicateFn(); err != nil {
+				level.Error(logger).Log("msg", "running replication failed", "err", err)
 				replicationRunCounter.WithLabelValues("error").Inc()
+
+				// No matter the error we want to repeat indefinitely.
 				return nil
 			}
-
 			replicationRunCounter.WithLabelValues("success").Inc()
 			level.Info(logger).Log("msg", "ran replication successfully")
 
-			// No matter the error we want to repeat indefinitely.
 			return nil
 		})
 	}, func(error) {
