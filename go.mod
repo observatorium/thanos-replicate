@@ -12,7 +12,7 @@ require (
 	github.com/prometheus/common v0.7.0
 	github.com/prometheus/prometheus v1.8.2-0.20190913102521-8ab628b35467
 	github.com/prometheus/tsdb v0.10.0
-	github.com/thanos-io/thanos v0.8.1
+	github.com/thanos-io/thanos v0.8.1-0.20191029132439-b7f3ac9e758d
 	go.uber.org/automaxprocs v1.2.0
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6
 )
