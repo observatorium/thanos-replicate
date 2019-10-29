@@ -190,6 +190,7 @@ func main() {
 	}
 
 	level.Info(logger).Log("msg", "exiting")
+	os.Exit(0)
 }
 
 func interrupt(logger log.Logger, cancel <-chan struct{}) error {

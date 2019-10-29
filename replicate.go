@@ -35,7 +35,7 @@ func registerReplicate(m map[string]setupFunc, app *kingpin.Application, name st
 
 	matcherStrs := cmd.Flag("matcher", "Only blocks whose labels match this matcher will be replicated.").PlaceHolder("key=\"value\"").Strings()
 
-	singleRun := cmd.Flag("single-run", "Run replication only one time, then exit.").Default("false").Bool()
+	singleRun := cmd.Flag("one-off", "Run replication only one time, then exit. Returns 0 only if all blocks were replicated.").Default("false").Bool()
 
 	m[name] = func(g *run.Group, logger log.Logger, reg *prometheus.Registry, tracer opentracing.Tracer, _ bool) error {
 		matchers, err := parseFlagMatchers(*matcherStrs)
