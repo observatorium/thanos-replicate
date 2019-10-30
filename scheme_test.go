@@ -306,7 +306,7 @@ func TestReplicationSchemeAll(t *testing.T) {
 			selector = c.selector
 		}
 
-		filter := NewNonCompactedBlockFilter(logger, selector).Filter
+		filter := NewBlockFilter(logger, selector, compact.ResolutionLevelRaw, 1).Filter
 
 		r := newReplicationScheme(
 			logger,

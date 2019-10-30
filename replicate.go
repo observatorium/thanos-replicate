@@ -14,6 +14,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/tsdb/labels"
+	"github.com/thanos-io/thanos/pkg/compact"
+	"github.com/thanos-io/thanos/pkg/compact/downsample"
 	"github.com/thanos-io/thanos/pkg/extflag"
 	"github.com/thanos-io/thanos/pkg/objstore/client"
 	"github.com/thanos-io/thanos/pkg/runutil"
@@ -35,6 +37,9 @@ func registerReplicate(m map[string]setupFunc, app *kingpin.Application, name st
 
 	matcherStrs := cmd.Flag("matcher", "Only blocks whose labels match this matcher will be replicated.").PlaceHolder("key=\"value\"").Strings()
 
+	resolution := cmd.Flag("resolution", "Only blocks with this resolution will be replicated.").Default(string(downsample.ResLevel0)).Int64()
+	compaction := cmd.Flag("compaction", "Only blocks with this compaction level will be replicated.").Default("1").Int()
+
 	singleRun := cmd.Flag("single-run", "Run replication only one time, then exit.").Default("false").Bool()
 
 	m[name] = func(g *run.Group, logger log.Logger, reg *prometheus.Registry, tracer opentracing.Tracer, _ bool) error {
@@ -50,6 +55,8 @@ func registerReplicate(m map[string]setupFunc, app *kingpin.Application, name st
 			tracer,
 			*httpMetricsBindAddr,
 			matchers,
+			compact.ResolutionLevel(*resolution),
+			*compaction,
 			fromObjStoreConfig,
 			toObjStoreConfig,
 			*singleRun,
@@ -64,6 +71,8 @@ func runReplicate(
 	_ opentracing.Tracer,
 	httpMetricsBindAddr string,
 	labelSelector labels.Selector,
+	resolution compact.ResolutionLevel,
+	compaction int,
 	fromObjStoreConfig *extflag.PathOrContent,
 	toObjStoreConfig *extflag.PathOrContent,
 	singleRun bool,
@@ -120,7 +129,12 @@ func runReplicate(
 	}, []string{"result"})
 	reg.MustRegister(replicationRunCounter)
 
-	blockFilter := NewNonCompactedBlockFilter(logger, labelSelector).Filter
+	blockFilter := NewBlockFilter(
+		logger,
+		labelSelector,
+		resolution,
+		compaction,
+	).Filter
 	metrics := newReplicationMetrics(reg)
 	ctx, cancel := context.WithCancel(context.Background())
 
