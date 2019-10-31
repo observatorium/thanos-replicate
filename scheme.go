@@ -23,39 +23,61 @@ import (
 	"github.com/thanos-io/thanos/pkg/runutil"
 )
 
-// NonCompactedBlockFilter is block filter that filters out compacted and unselected blocks.
-type NonCompactedBlockFilter struct {
-	logger        log.Logger
-	labelSelector labels.Selector
+// BlockFilter is block filter that filters out compacted and unselected blocks.
+type BlockFilter struct {
+	logger          log.Logger
+	labelSelector   labels.Selector
+	resolutionLevel compact.ResolutionLevel
+	compactionLevel int
 }
 
-// NewNonCompactedBlockFilter returns block filter.
-func NewNonCompactedBlockFilter(logger log.Logger, labelSelector labels.Selector) *NonCompactedBlockFilter {
-	return &NonCompactedBlockFilter{
-		labelSelector: labelSelector,
-		logger:        logger,
+// NewBlockFilter returns block filter.
+func NewBlockFilter(
+	logger log.Logger,
+	labelSelector labels.Selector,
+	resolutionLevel compact.ResolutionLevel,
+	compactionLevel int,
+) *BlockFilter {
+	return &BlockFilter{
+		labelSelector:   labelSelector,
+		logger:          logger,
+		resolutionLevel: resolutionLevel,
+		compactionLevel: compactionLevel,
 	}
 }
 
 // Filter return true if block is non-compacted and matches selector.
-func (bf *NonCompactedBlockFilter) Filter(b *metadata.Meta) bool {
+func (bf *BlockFilter) Filter(b *metadata.Meta) bool {
 	blockLabels := labels.FromMap(b.Thanos.Labels)
 
 	labelMatch := bf.labelSelector.Matches(blockLabels)
 	if !labelMatch {
-		level.Debug(bf.logger).Log("msg", "filtering block", "reason", "labels don't match")
+		selStr := "{"
+		for i, m := range bf.labelSelector {
+			if i != 0 {
+				selStr += ","
+			}
+			selStr += m.String()
+		}
+		selStr += "}"
+
+		level.Debug(bf.logger).Log("msg", "filtering block", "reason", "labels don't match", "block_labels", blockLabels.String(), "selector", selStr)
 		return false
 	}
 
-	resolutionMatch := compact.ResolutionLevel(b.Thanos.Downsample.Resolution) == compact.ResolutionLevelRaw
+	gotResolution := compact.ResolutionLevel(b.Thanos.Downsample.Resolution)
+	expectedResolution := bf.resolutionLevel
+	resolutionMatch := gotResolution == expectedResolution
 	if !resolutionMatch {
-		level.Debug(bf.logger).Log("msg", "filtering block", "reason", "resolutions don't match")
+		level.Debug(bf.logger).Log("msg", "filtering block", "reason", "resolutions don't match", "got_resolution", gotResolution, "expected_resolution", expectedResolution)
 		return false
 	}
 
-	compactionMatch := b.BlockMeta.Compaction.Level == 1
+	gotCompactionLevel := b.BlockMeta.Compaction.Level
+	expectedCompactionLevel := bf.compactionLevel
+	compactionMatch := gotCompactionLevel == expectedCompactionLevel
 	if !compactionMatch {
-		level.Debug(bf.logger).Log("msg", "filtering block", "reason", "compaction levels don't match")
+		level.Debug(bf.logger).Log("msg", "filtering block", "reason", "compaction levels don't match", "got_compaction_level", gotCompactionLevel, "expected_compaction_level", expectedCompactionLevel)
 		return false
 	}
 
