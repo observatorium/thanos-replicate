@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strconv"
 	"time"
 
 	"github.com/go-kit/kit/log"
@@ -37,7 +38,7 @@ func registerReplicate(m map[string]setupFunc, app *kingpin.Application, name st
 
 	matcherStrs := cmd.Flag("matcher", "Only blocks whose labels match this matcher will be replicated.").PlaceHolder("key=\"value\"").Strings()
 
-	resolution := cmd.Flag("resolution", "Only blocks with this resolution will be replicated.").Default(string(downsample.ResLevel0)).Int64()
+	resolution := cmd.Flag("resolution", "Only blocks with this resolution will be replicated.").Default(strconv.FormatInt(downsample.ResLevel0, 10)).Int64()
 	compaction := cmd.Flag("compaction", "Only blocks with this compaction level will be replicated.").Default("1").Int()
 
 	singleRun := cmd.Flag("single-run", "Run replication only one time, then exit.").Default("false").Bool()
