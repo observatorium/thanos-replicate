@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: thanos-replicate
+  namespace: observatorium
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: thanos-replicate
+  serviceName: thanos-replicate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: thanos-replicate
+    spec:
+      containers:
+      - args:
+        - run
+        - --objstorefrom.config=$(REPLICATE_OBJSTORE_CONFIG)
+        - --objstoreto.config=$(OBJSTORE_CONFIG)
+        - --log.level=debug
+        env:
+        - name: OBJSTORE_CONFIG
+          valueFrom:
+            secretKeyRef:
+              key: key
+              name: name
+        - name: REPLICATE_OBJSTORE_CONFIG
+          valueFrom:
+            secretKeyRef:
+              key: key
+              name: name
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              key: aws_access_key_id
+              name: thanos-s3-reader
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              key: aws_secret_access_key
+              name: thanos-s3-reader
+        image: quay.io/observatorium/thanos-replicate:master-2019-10-25-1f8a062
+        name: thanos-replicate
+        ports:
+        - containerPort: 10902
+          name: http
+        resources:
+          limits:
+            cpu: 500m
+            memory: 5Gi
+          requests:
+            cpu: 300m
+            memory: 1Gi

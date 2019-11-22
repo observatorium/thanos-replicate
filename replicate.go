@@ -128,7 +128,14 @@ func runReplicate(
 		Name: "thanos_replicate_replication_runs_total",
 		Help: "The number of replication runs split by success and error.",
 	}, []string{"result"})
+
+	replicationRunDuration := prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "thanos_replicate_replication_run_duration_seconds",
+		Help: "The Duration of replication runs split by success and error.",
+	}, []string{"result"})
+
 	reg.MustRegister(replicationRunCounter)
+	reg.MustRegister(replicationRunDuration)
 
 	blockFilter := NewBlockFilter(
 		logger,
@@ -167,14 +174,17 @@ func runReplicate(
 		}
 
 		return runutil.Repeat(time.Minute, ctx.Done(), func() error {
+			start := time.Now()
 			if err := replicateFn(); err != nil {
 				level.Error(logger).Log("msg", "running replication failed", "err", err)
 				replicationRunCounter.WithLabelValues("error").Inc()
+				replicationRunDuration.WithLabelValues("error").Observe(time.Since(start).Seconds())
 
 				// No matter the error we want to repeat indefinitely.
 				return nil
 			}
 			replicationRunCounter.WithLabelValues("success").Inc()
+			replicationRunDuration.WithLabelValues("success").Observe(time.Since(start).Seconds())
 			level.Info(logger).Log("msg", "ran replication successfully")
 
 			return nil

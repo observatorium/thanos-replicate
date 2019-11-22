@@ -13,3 +13,5 @@
 
 /thanos-replicate
 /tmp
+/jsonnet/vendor
+jsonnetfile.lock.json
