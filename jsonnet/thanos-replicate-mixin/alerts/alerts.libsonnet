@@ -34,6 +34,23 @@
               severity: 'critical',
             },
           },
+          {
+            alert: 'ThanosReplicateRunLatency',
+            annotations: {
+              message: 'Thanos Replicate {{$labels.job}} has a 99th percentile latency of {{ $value }} seconds for the replicate operations.',
+            },
+            expr: |||
+              (
+                histogram_quantile(0.9, sum by (job, le) (thanos_replicate_replication_run_duration_seconds_bucket{%(thanosReplicateSelector)s})) > 120
+              and
+                sum by (job) (rate(thanos_replicate_replication_run_duration_seconds_bucket{%(thanosReplicateSelector)s}[5m])) > 0
+              )
+            ||| % $._config,
+            'for': '5m',
+            labels: {
+              severity: 'critical',
+            },
+          },
         ],
       },
     ],
