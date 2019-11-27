@@ -24,9 +24,9 @@
             },
             expr: |||
               (
-                sum(rate(thanos_replicate_replication_runs_total{result="error", %(thanosReplicateSelector)s}))
+                sum(rate(thanos_replicate_replication_runs_total{result="error", %(thanosReplicateSelector)s}[5m]))
               / on (namespace) group_left
-                sum(rate(thanos_replicate_replication_runs_total{%(thanosReplicateSelector)s}))
+                sum(rate(thanos_replicate_replication_runs_total{%(thanosReplicateSelector)s}[5m]))
               ) * 100 >= 10
             ||| % $._config,
             'for': '5m',

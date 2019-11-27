@@ -15,9 +15,9 @@ groups:
         failed.
     expr: |
       (
-        sum(rate(thanos_replicate_replication_runs_total{result="error", job=~"thanos-replicate.*"}))
+        sum(rate(thanos_replicate_replication_runs_total{result="error", job=~"thanos-replicate.*"}[5m]))
       / on (namespace) group_left
-        sum(rate(thanos_replicate_replication_runs_total{job=~"thanos-replicate.*"}))
+        sum(rate(thanos_replicate_replication_runs_total{job=~"thanos-replicate.*"}[5m]))
       ) * 100 >= 10
     for: 5m
     labels:
@@ -28,10 +28,10 @@ groups:
         $value }} seconds for the replicate operations.
     expr: |
       (
-        histogram_quantile(0.9, sum by (job, le) (thanos_replicate_replication_run_duration_seconds_bucket{job=~"thanos-replicate.*"})) > 2
+        histogram_quantile(0.9, sum by (job, le) (thanos_replicate_replication_run_duration_seconds_bucket{job=~"thanos-replicate.*"})) > 120
       and
         sum by (job) (rate(thanos_replicate_replication_run_duration_seconds_bucket{job=~"thanos-replicate.*"}[5m])) > 0
       )
-    for: 10m
+    for: 5m
     labels:
       severity: critical

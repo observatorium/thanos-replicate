@@ -53,20 +53,25 @@ func (bf *BlockFilter) Filter(b *metadata.Meta) bool {
 	labelMatch := bf.labelSelector.Matches(blockLabels)
 	if !labelMatch {
 		selStr := "{"
+
 		for i, m := range bf.labelSelector {
 			if i != 0 {
 				selStr += ","
 			}
+
 			selStr += m.String()
 		}
+
 		selStr += "}"
 
 		level.Debug(bf.logger).Log("msg", "filtering block", "reason", "labels don't match", "block_labels", blockLabels.String(), "selector", selStr)
+
 		return false
 	}
 
 	gotResolution := compact.ResolutionLevel(b.Thanos.Downsample.Resolution)
 	expectedResolution := bf.resolutionLevel
+
 	resolutionMatch := gotResolution == expectedResolution
 	if !resolutionMatch {
 		level.Debug(bf.logger).Log("msg", "filtering block", "reason", "resolutions don't match", "got_resolution", gotResolution, "expected_resolution", expectedResolution)
@@ -75,6 +80,7 @@ func (bf *BlockFilter) Filter(b *metadata.Meta) bool {
 
 	gotCompactionLevel := b.BlockMeta.Compaction.Level
 	expectedCompactionLevel := bf.compactionLevel
+
 	compactionMatch := gotCompactionLevel == expectedCompactionLevel
 	if !compactionMatch {
 		level.Debug(bf.logger).Log("msg", "filtering block", "reason", "compaction levels don't match", "got_compaction_level", gotCompactionLevel, "expected_compaction_level", expectedCompactionLevel)

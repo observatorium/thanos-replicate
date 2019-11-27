@@ -19,12 +19,12 @@ go-vendor: go.mod go.sum
 .PHONY: lint
 lint: fmt ${ALERTS} ${RULES}
 	golangci-lint run -v --enable-all
-	# promtool check rules ${ALERTS} ${RULES}
+	promtool check rules ${ALERTS} ${RULES}
 
 .PHONY: test ${ALERTS} ${RULES}
 test:
-	CGO_ENABLED=1 GO111MODULE=on GOPROXY=https://proxy.golang.org go test -v -race ./...
-	# promtool test rules tests.yaml
+	CGO_ENABLED=1 GO111MODULE=on go test -v -race ./...
+	# CGO_ENABLED=1 GO111MODULE=on GOPROXY=https://proxy.golang.org go test -v -race ./...
 
 .PHONY: clean
 clean:
