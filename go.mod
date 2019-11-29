@@ -16,3 +16,5 @@ require (
 	go.uber.org/automaxprocs v1.2.0
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6
 )
+
+replace k8s.io/client-go => k8s.io/client-go v0.0.0-20190620085101-78d2af792bab
