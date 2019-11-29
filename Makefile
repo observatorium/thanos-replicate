@@ -23,8 +23,7 @@ lint: fmt ${ALERTS} ${RULES}
 
 .PHONY: test ${ALERTS} ${RULES}
 test:
-	CGO_ENABLED=1 GO111MODULE=on go test -v -race ./...
-	# CGO_ENABLED=1 GO111MODULE=on GOPROXY=https://proxy.golang.org go test -v -race ./...
+	CGO_ENABLED=1 GO111MODULE=on GOPROXY=https://proxy.golang.org go test -v -race ./...
 
 .PHONY: clean
 clean:
