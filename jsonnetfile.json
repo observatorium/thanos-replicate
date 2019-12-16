@@ -34,14 +34,14 @@
       "name": "thanos-mixin",
       "source": {
         "git": {
-          "remote": "https://github.com/metalmatze/kube-thanos",
-          "subdir": "jsonnet/thanos-mixin"
+          "remote": "https://github.com/thanos-io/thanos",
+          "subdir": "mixin/thanos"
         }
       },
       "version": "master"
     },
     {
-      "name": "thanos-replciate-mixin",
+      "name": "thanos-replicate-mixin",
       "source": {
         "local": {
           "directory": "jsonnet/thanos-replicate-mixin"

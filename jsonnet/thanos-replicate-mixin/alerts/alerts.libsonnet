@@ -1,4 +1,10 @@
 {
+  local thanos = self,
+  replicator+:: {
+    jobPrefix: error 'must provide job prefix for Thanos Replicate dashboard',
+    selector: error 'must provide selector for Thanos Replicate dashboard',
+    title: error 'must provide title for Thanos Replicate dashboard',
+  },
   prometheusAlerts+:: {
     groups+: [
       {
@@ -7,8 +13,8 @@
           {
             alert: 'ThanosReplicateIsDown',
             expr: |||
-              absent(up{%(thanosReplicateSelector)s})
-            ||| % $._config,
+              absent(up{%(selector)s})
+            ||| % thanos.replicator,
             'for': '5m',
             labels: {
               severity: 'critical',
@@ -24,11 +30,11 @@
             },
             expr: |||
               (
-                sum(rate(thanos_replicate_replication_runs_total{result="error", %(thanosReplicateSelector)s}[5m]))
+                sum(rate(thanos_replicate_replication_runs_total{result="error", %(selector)s}[5m]))
               / on (namespace) group_left
-                sum(rate(thanos_replicate_replication_runs_total{%(thanosReplicateSelector)s}[5m]))
+                sum(rate(thanos_replicate_replication_runs_total{%(selector)s}[5m]))
               ) * 100 >= 10
-            ||| % $._config,
+            ||| % thanos.replicator,
             'for': '5m',
             labels: {
               severity: 'critical',
@@ -41,11 +47,11 @@
             },
             expr: |||
               (
-                histogram_quantile(0.9, sum by (job, le) (thanos_replicate_replication_run_duration_seconds_bucket{%(thanosReplicateSelector)s})) > 120
+                histogram_quantile(0.9, sum by (job, le) (thanos_replicate_replication_run_duration_seconds_bucket{%(selector)s})) > 120
               and
-                sum by (job) (rate(thanos_replicate_replication_run_duration_seconds_bucket{%(thanosReplicateSelector)s}[5m])) > 0
+                sum by (job) (rate(thanos_replicate_replication_run_duration_seconds_bucket{%(selector)s}[5m])) > 0
               )
-            ||| % $._config,
+            ||| % thanos.replicator,
             'for': '5m',
             labels: {
               severity: 'critical',

@@ -66,15 +66,15 @@ ${MANIFESTS}: jsonnet/main.jsonnet jsonnet/lib/*
 	jsonnet -J jsonnet/vendor -m ${MANIFESTS} jsonnet/main.jsonnet | xargs -I{} sh -c 'cat {} | gojsontoyaml > {}.yaml && rm -f {}' -- {}
 
 .PHONY: ${DASHBOARDS}
-${DASHBOARDS}: jsonnet/thanos-replicate-mixin/mixin.libsonnet jsonnet/thanos-replicate-mixin/config.libsonnet jsonnet/thanos-replicate-mixin/dashboards/*
+${DASHBOARDS}: jsonnet/thanos-replicate-mixin/mixin.libsonnet jsonnet/thanos-replicate-mixin/defaults.libsonnet jsonnet/thanos-replicate-mixin/dashboards/*
 	@rm -rf ${DASHBOARDS}
 	@mkdir -p ${DASHBOARDS}
 	jsonnet -J jsonnet/vendor -m ${DASHBOARDS} jsonnet/thanos-replicate-mixin/dashboards.jsonnet
 
-${ALERTS}: jsonnet/thanos-replicate-mixin/mixin.libsonnet jsonnet/thanos-replicate-mixin/config.libsonnet jsonnet/thanos-replicate-mixin/alerts/*
+${ALERTS}: jsonnet/thanos-replicate-mixin/mixin.libsonnet jsonnet/thanos-replicate-mixin/defaults.libsonnet jsonnet/thanos-replicate-mixin/alerts/*
 	jsonnet jsonnet/thanos-replicate-mixin/alerts.jsonnet | gojsontoyaml > $@
 
-${RULES}: jsonnet/thanos-replicate-mixin/mixin.libsonnet jsonnet/thanos-replicate-mixin/config.libsonnet jsonnet/thanos-replicate-mixin/rules/*
+${RULES}: jsonnet/thanos-replicate-mixin/mixin.libsonnet jsonnet/thanos-replicate-mixin/defaults.libsonnet jsonnet/thanos-replicate-mixin/rules/*
 	jsonnet jsonnet/thanos-replicate-mixin/rules.jsonnet | gojsontoyaml > $@
 
 .PHONY: jsonnet-vendor
