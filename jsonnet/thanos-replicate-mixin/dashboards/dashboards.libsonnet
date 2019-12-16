@@ -46,7 +46,7 @@ local g = import 'thanos-mixin/lib/thanos-grafana-builder/builder.libsonnet';
               'sum(rate(thanos_replicate_blocks_replicated_total{namespace="$namespace",%(selector)s}[$interval]))' % thanos.replicator,
               'sum(rate(thanos_replicate_objects_replicated_total{namespace="$namespace",%(selector)s}[$interval]))' % thanos.replicator,
             ],
-            ['', '', '', '', '', '']
+            ['iterations', 'meta loads', 'partial meta reads', 'already replicated blocks', 'replicated blocks', 'replicated objects']
           )
         )
       )
