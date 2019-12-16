@@ -30,7 +30,7 @@ local g = import 'thanos-mixin/lib/thanos-grafana-builder/builder.libsonnet';
         )
         .addPanel(
           g.panel('Duration', 'Shows how long has it taken to run a replication cycle.') +
-          g.latencyPanel('thanos_replicate_replication_run_duration_seconds', 'result="success", namespace="$namespace",%(selector)s}' % thanos.replicator)
+          g.latencyPanel('thanos_replicate_replication_run_duration_seconds', 'result="success", namespace="$namespace",%(selector)s' % thanos.replicator)
         )
       )
       .addRow(
