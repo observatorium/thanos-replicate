@@ -201,7 +201,7 @@
                "steppedLine": false,
                "targets": [
                   {
-                     "expr": "histogram_quantile(0.99, sum(rate(thanos_replicate_replication_run_duration_seconds_bucket{result=\"success\", namespace=\"$namespace\",job=~\"thanos-replicate.*\"}}[$interval])) by (job, le)) * 1",
+                     "expr": "histogram_quantile(0.99, sum(rate(thanos_replicate_replication_run_duration_seconds_bucket{result=\"success\", namespace=\"$namespace\",job=~\"thanos-replicate.*\"}[$interval])) by (job, le)) * 1",
                      "format": "time_series",
                      "intervalFactor": 2,
                      "legendFormat": "P99 {{job}}",
@@ -209,7 +209,7 @@
                      "step": 10
                   },
                   {
-                     "expr": "sum(rate(thanos_replicate_replication_run_duration_seconds_sum{result=\"success\", namespace=\"$namespace\",job=~\"thanos-replicate.*\"}}[$interval])) by (job) * 1 / sum(rate(thanos_replicate_replication_run_duration_seconds_count{result=\"success\", namespace=\"$namespace\",job=~\"thanos-replicate.*\"}}[$interval])) by (job)",
+                     "expr": "sum(rate(thanos_replicate_replication_run_duration_seconds_sum{result=\"success\", namespace=\"$namespace\",job=~\"thanos-replicate.*\"}[$interval])) by (job) * 1 / sum(rate(thanos_replicate_replication_run_duration_seconds_count{result=\"success\", namespace=\"$namespace\",job=~\"thanos-replicate.*\"}[$interval])) by (job)",
                      "format": "time_series",
                      "intervalFactor": 2,
                      "legendFormat": "mean {{job}}",
@@ -217,7 +217,7 @@
                      "step": 10
                   },
                   {
-                     "expr": "histogram_quantile(0.50, sum(rate(thanos_replicate_replication_run_duration_seconds_bucket{result=\"success\", namespace=\"$namespace\",job=~\"thanos-replicate.*\"}}[$interval])) by (job, le)) * 1",
+                     "expr": "histogram_quantile(0.50, sum(rate(thanos_replicate_replication_run_duration_seconds_bucket{result=\"success\", namespace=\"$namespace\",job=~\"thanos-replicate.*\"}[$interval])) by (job, le)) * 1",
                      "format": "time_series",
                      "intervalFactor": 2,
                      "legendFormat": "P50 {{job}}",
@@ -510,7 +510,7 @@
       ]
    },
    "timezone": "",
-   "title": "Thanos / Replicate",
+   "title": "Thanos / Replicator",
    "uid": "16a3b3dc9fd7009f7ba773706766856c",
    "version": 0
 }
