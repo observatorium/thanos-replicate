@@ -2,6 +2,8 @@
 
 This project allows replicating blocks of time-series data produced by [Thanos](https://thanos.io/) from one object storage bucket to another.
 
+**WARNING: This project is deprecated. This tool was moved to be official Thanos command: [thanos tools bucket replicate](https://thanos.io/components/tools.md/#bucket-replicate). Use the official one instead.**
+
 ## Usage
 
 To setup replication from one bucket to another use the [typical bucket specification](https://thanos.io/storage.md/#configuration) of Thanos.
